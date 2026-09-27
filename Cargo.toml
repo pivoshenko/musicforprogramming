@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/mfp-core", "crates/mfp-daemon", "crates/mfp-tui"]
 
 [workspace.package]
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"
@@ -43,7 +43,7 @@ redundant_clone = "deny"
 # The version is not redundant with the path: cargo publish rejects a path dependency
 # that carries none, and cargo-deny reads its absence as a wildcard. The release
 # workflow rewrites it alongside the workspace version
-mfp-core = { path = "crates/mfp-core", version = "1.2.0" }
+mfp-core = { path = "crates/mfp-core", version = "1.2.1" }
 
 anyhow = "1.0.104"
 base64 = "0.22.1"

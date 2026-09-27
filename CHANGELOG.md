@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-09-27
+
+### Bug fixes
+
+- **tui**: Start the daemon in its own session
+
+### Documentation
+
+- **herdr**: Describe the plugin as it is now built
+
+### Style
+
+- Capitalize every user-facing message
+
 ## [1.2.0] - 2026-09-27
 
 ### Bug fixes
@@ -18,6 +32,10 @@ All notable changes to this project will be documented in this file.
 - **herdr**: Start the daemon outside the pane
 - **herdr**: Install the player from the plugin when it is missing
 - **herdr**: Add a plugin that drives the player from Herdr
+
+### Release
+
+- V1.2.0
 
 ## [1.1.0] - 2026-09-27
 
