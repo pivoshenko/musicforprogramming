@@ -31,5 +31,5 @@ generate-changelog:
     git-cliff --output CHANGELOG.md
 
 generate-social-preview:
-    rsvg-convert -b '#1f1f1e' --page-width 1280 --page-height 640 --top 41 \
-      -w 1280 -h 558 assets/preview_social_dark.svg -o assets/preview_social_dark.png
+    rsvg-convert -b '#1f1f1e' --page-width 1280 --page-height 640 --top 146 \
+      -w 1280 -h 348 assets/preview_social_dark.svg -o assets/preview_social_dark.png
