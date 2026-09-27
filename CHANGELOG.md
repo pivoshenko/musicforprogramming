@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3] - 2026-09-27
+
+### CI/CD
+
+- Install the arm64 sysroot for the cross build
+
 ## [1.0.2] - 2026-09-27
 
 ### CI/CD
 
 - Install the cross target under the pinned toolchain
+
+### Release
+
+- V1.0.2
 
 ## [1.0.1] - 2026-09-27
 
