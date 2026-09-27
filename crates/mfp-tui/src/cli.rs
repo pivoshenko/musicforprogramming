@@ -23,7 +23,11 @@ pub const EXIT_USAGE: u8 = 2;
 pub const EXIT_UNREACHABLE: u8 = 3;
 
 #[derive(Debug, Parser)]
-#[command(name = "mfp", about = "The musicforprogramming.net terminal player")]
+#[command(
+    name = "mfp",
+    version,
+    about = "The musicforprogramming.net terminal player"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
