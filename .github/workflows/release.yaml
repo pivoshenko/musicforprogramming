@@ -46,8 +46,14 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "resolved version: ${VERSION}"
 
+      # The workspace version and the internal dependency's version both, because the
+      # mfp-core that mfp-daemon and mfp-tui declare has to be the one this release
+      # publishes or cargo publish rejects them
       - name: Update version
-        run: sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" Cargo.toml
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s|^mfp-core = { path = \"crates/mfp-core\", version = \".*\" }|mfp-core = { path = \"crates/mfp-core\", version = \"${VERSION}\" }|" Cargo.toml
 
       - name: Update lockfile
         run: |

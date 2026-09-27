@@ -40,7 +40,10 @@ await_holding_invalid_type = "deny"
 redundant_clone = "deny"
 
 [workspace.dependencies]
-mfp-core = { path = "crates/mfp-core" }
+# The version is not redundant with the path: cargo publish rejects a path dependency
+# that carries none, and cargo-deny reads its absence as a wildcard. The release
+# workflow rewrites it alongside the workspace version
+mfp-core = { path = "crates/mfp-core", version = "0.1.0" }
 
 anyhow = "1.0.104"
 base64 = "0.22.1"
