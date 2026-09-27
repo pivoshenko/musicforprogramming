@@ -8,11 +8,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/pivoshenko/musicforprogramming/actions/workflows/ci.yaml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/pivoshenko/musicforprogramming/ci.yaml?style=flat-square&logo=github&logoColor=white&label=CI&color=5CA88A"></a>
-  <a href="https://github.com/pivoshenko/musicforprogramming/releases"><img alt="Release" src="https://img.shields.io/github/v/release/pivoshenko/musicforprogramming?style=flat-square&logo=github&logoColor=white&color=A88CCC&label=Release"></a>
-  <a href="https://crates.io/crates/mfp-tui"><img alt="Crates.io" src="https://img.shields.io/crates/v/mfp-tui?style=flat-square&logo=rust&logoColor=white&color=D4A85A&label=Crates.io"></a>
+  <a href="https://github.com/pivoshenko/musicforprogramming/actions/workflows/ci.yaml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/pivoshenko/musicforprogramming/ci.yaml?style=flat-square&logo=github&logoColor=white&label=CI&color=0A6847"></a>
+  <a href="https://github.com/pivoshenko/musicforprogramming/releases"><img alt="Release" src="https://img.shields.io/github/v/release/pivoshenko/musicforprogramming?style=flat-square&logo=github&logoColor=white&color=4856CD&label=Release"></a>
+  <a href="https://crates.io/crates/mfp-tui"><img alt="Crates.io" src="https://img.shields.io/crates/v/mfp-tui?style=flat-square&logo=rust&logoColor=white&color=4856CD&label=Crates.io"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-Stable-F74C00?style=flat-square&logo=rust&logoColor=white">
-  <a href="https://github.com/pivoshenko/musicforprogramming/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-5CA88A?style=flat-square&logo=opensourceinitiative&logoColor=white"></a>
+  <a href="https://github.com/pivoshenko/musicforprogramming/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-0A6847?style=flat-square&logo=opensourceinitiative&logoColor=white"></a>
   <a href="https://stand-with-ukraine.pp.ua"><img alt="Stand with Ukraine" src="https://img.shields.io/badge/Stand_With-Ukraine-FFD700?style=flat-square&labelColor=0057B7"></a>
 </p>
 
