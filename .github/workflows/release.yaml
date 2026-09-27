@@ -111,6 +111,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # dtolnay/rust-toolchain adds the target to stable, but rust-toolchain.toml pins
+      # 1.96.0, so cargo switches to that toolchain and finds no std for a cross
+      # target. rustup honours the pin, so this adds the target where it is used
+      - name: Install cross target
+        run: rustup target add ${{ matrix.target }}
+
       # rodio links against ALSA on Linux, and the aarch64 build needs the
       # cross linker plus the target's own copy of the library
       - name: Install audio dependencies
