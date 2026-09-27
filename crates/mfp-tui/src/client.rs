@@ -357,8 +357,8 @@ fn reap_finished(children: &mut Vec<std::process::Child>) {
     children.retain_mut(|child| matches!(child.try_wait(), Ok(None)));
 }
 
-/// Starts a daemon in its own process group with its output in the log file, so it
-/// survives this process and can never write over the interface.
+/// Starts a daemon in its own session with its output in the log file, so it survives
+/// this process and can never write over the interface.
 fn spawn_daemon(program: &Path) -> Result<(), ClientError> {
     let log = paths::log_file().map_err(|error| {
         ClientError::Unreachable(format!("Cannot resolve the log file: {error}"))
@@ -376,19 +376,31 @@ fn spawn_daemon(program: &Path) -> Result<(), ClientError> {
         .try_clone()
         .map_err(|error| ClientError::Unreachable(error.to_string()))?;
 
-    let child = std::process::Command::new(program)
+    let mut command = std::process::Command::new(program);
+    command
         .stdin(std::process::Stdio::null())
         .stdout(out)
-        .stderr(err)
-        .process_group(0)
-        .spawn()
-        .map_err(|error| {
-            ClientError::Unreachable(format!(
-                "Cannot start {}: {error}; see {}",
-                program.display(),
-                log.display()
-            ))
-        })?;
+        .stderr(err);
+
+    // A new process group is not enough: it leaves the daemon in the terminal's session, and
+    // a multiplexer closing a pane sweeps the whole session, so closing the player pane took
+    // playback down with it. `setsid` also drops the controlling terminal
+    //
+    // SAFETY: `setsid` is async-signal-safe and touches nothing this fork shares
+    unsafe {
+        command.pre_exec(|| match libc::setsid() {
+            -1 => Err(std::io::Error::last_os_error()),
+            _ => Ok(()),
+        });
+    }
+
+    let child = command.spawn().map_err(|error| {
+        ClientError::Unreachable(format!(
+            "Cannot start {}: {error}; see {}",
+            program.display(),
+            log.display()
+        ))
+    })?;
 
     // Recovered from poisoning rather than propagated: nothing here can panic while the
     // lock is held, and failing a daemon start over a lock is worse than a stray child
