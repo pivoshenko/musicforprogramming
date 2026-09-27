@@ -1,12 +1,56 @@
-# musicforprogramming
+<p align="center">
+  <a href="https://github.com/pivoshenko/musicforprogramming">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/assets/preview_social_dark.svg" />
+      <img alt="musicforprogramming - a terminal player for musicforprogramming.net, written in Rust" src="https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/assets/preview_social_light.svg" width="800" />
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/pivoshenko/musicforprogramming/actions/workflows/ci.yaml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/pivoshenko/musicforprogramming/ci.yaml?style=flat-square&logo=github&logoColor=white&label=CI&color=5CA88A"></a>
+  <a href="https://github.com/pivoshenko/musicforprogramming/releases"><img alt="Release" src="https://img.shields.io/github/v/release/pivoshenko/musicforprogramming?style=flat-square&logo=github&logoColor=white&color=A88CCC&label=Release"></a>
+  <a href="https://crates.io/crates/mfp-tui"><img alt="Crates.io" src="https://img.shields.io/crates/v/mfp-tui?style=flat-square&logo=rust&logoColor=white&color=D4A85A&label=Crates.io"></a>
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-Stable-F74C00?style=flat-square&logo=rust&logoColor=white">
+  <a href="https://github.com/pivoshenko/musicforprogramming/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-5CA88A?style=flat-square&logo=opensourceinitiative&logoColor=white"></a>
+  <a href="https://stand-with-ukraine.pp.ua"><img alt="Stand with Ukraine" src="https://img.shields.io/badge/Stand_With-Ukraine-FFD700?style=flat-square&labelColor=0057B7"></a>
+</p>
 
 A terminal player for [musicforprogramming.net](https://musicforprogramming.net), written in
 Rust. A background daemon owns playback and downloads; `mfp` is the interface you look at and
 the CLI you script against.
 
+macOS and Linux only. The client talks to the daemon over a Unix domain socket, so there is
+no Windows build.
+
 ## Install
 
-Requires a Rust toolchain matching `rust-toolchain.toml` (stable, 1.96+).
+### Standalone Installer
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/scripts/install.sh | sh
+```
+
+Installs `mfp` and `mfp-daemon` into `~/.local/bin`. `$MFP_INSTALL_DIR` picks another
+directory, `$MFP_VERSION` another release.
+
+### Homebrew
+
+```sh
+brew install pivoshenko/tap/musicforprogramming
+```
+
+### Cargo
+
+```sh
+cargo install mfp-daemon
+cargo install mfp-tui
+```
+
+### From Source
+
+Requires a Rust toolchain matching `rust-toolchain.toml` (stable, 1.96+), and
+`libasound2-dev` on Linux.
 
 ```sh
 cargo install --path crates/mfp-daemon
@@ -87,19 +131,6 @@ library you browse, not something the system should reclaim behind your back.
 | `mfp-core` | Episode and catalog model, the wire protocol, config, every path |
 | `mfp-daemon` | Audio engine, streaming and downloads, the socket server, durable state |
 | `mfp-tui` | The `mfp` binary: argument parsing, the socket client, the interface |
-
-## Development
-
-```sh
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo deny check
-```
-
-The lint set in `Cargo.toml` is deliberately narrow: lints that catch a defect, not lints that
-enforce a house style. `unwrap`, `expect`, and `panic` are denied in production code and
-allowed in tests, where a panic is the failure report.
 
 ## License
 
