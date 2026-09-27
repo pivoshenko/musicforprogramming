@@ -97,6 +97,16 @@ interface. `MFP_NO_UPDATE_CHECK=1` turns the check and the notice off.
 | `?`                 | Help                            |
 | `q`                 | Quit                            |
 
+## Herdr
+
+[`plugins/herdr/mfp.player`](plugins/herdr/mfp.player) is a [Herdr](https://herdr.dev) plugin that opens the interface as a pane and puts the transport on actions.
+
+```sh
+herdr plugin install pivoshenko/musicforprogramming/plugins/herdr/mfp.player
+```
+
+Each action runs this CLI and then reports where it left the player, so a keypress is answered without opening anything. It needs `mfp` on `PATH` and nothing else - see the [plugin's own README](plugins/herdr/mfp.player/README.md) for what it provides and for the keybindings to copy, which a plugin cannot ship itself.
+
 ## Configuration
 
 `config.toml` is optional - every setting has a default, and a missing file is not an error. A file that exists but does not parse is.

@@ -10,6 +10,11 @@ macOS and Linux only. The client reaches the daemon over a Unix domain socket an
 is chmodded through `PermissionsExt`, so there is no Windows target and CI has no Windows leg.
 `AGENTS.md` is a symlink to this file.
 
+`plugins/herdr/mfp.player` is a Herdr plugin, not Rust: a `herdr-plugin.toml` manifest whose transport
+actions are the `mfp` CLI verbatim, plus one Node script for the action that needs to render its
+result. It is outside the workspace, so `just check` does not see it - changing a CLI verb or an exit
+code is what would break it.
+
 ## Commands
 
 `just` is the task runner - `just --list` for the full set, or the recipe table in `CONTRIBUTING.md`.

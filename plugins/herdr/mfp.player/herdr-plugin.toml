@@ -1,0 +1,66 @@
+id = "mfp.player"
+name = "mfp.player"
+version = "0.1.0"
+min_herdr_version = "0.7.3"
+description = "mfp.player - control the musicforprogramming.net player from Herdr"
+# No Windows: the client speaks over a Unix domain socket and the state directory is chmodded
+# through PermissionsExt, so there is no Windows build to drive
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "player"
+title = "musicforprogramming"
+placement = "overlay"
+command = ["mfp"]
+
+# Not redundant with the pane above: a keybinding's `plugin_action` type takes an action id and
+# cannot target a pane entrypoint, so this is what a key reaches
+[[actions]]
+id = "open"
+title = "mfp: open the player"
+contexts = ["workspace", "global"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "mfp.player", "--entrypoint", "player"]
+
+[[actions]]
+id = "play-stop"
+title = "mfp: play / stop"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "play-stop"]
+
+# `toggle` acts on the loaded episode, so with nothing loaded it is correctly a no-op. `play` is
+# the verb that starts from cold, which is why both exist
+[[actions]]
+id = "play"
+title = "mfp: play"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "play"]
+
+[[actions]]
+id = "toggle"
+title = "mfp: play / pause"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "toggle"]
+
+[[actions]]
+id = "next"
+title = "mfp: next episode"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "next"]
+
+[[actions]]
+id = "prev"
+title = "mfp: previous episode"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "prev"]
+
+[[actions]]
+id = "stop"
+title = "mfp: stop playback"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/transport.mjs", "stop"]
+
+[[actions]]
+id = "now-playing"
+title = "mfp: now playing"
+contexts = ["workspace", "global"]
+command = ["node", "plugin/now-playing.mjs"]
