@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-09-27
+
+### Bug fixes
+
+- **tui**: Detach on ctrl+c instead of shutting the daemon down
+
+### Documentation
+
+- Move the crate layout to the contributor guide
+- **readme**: Group install and the plugin under an overview heading
+
+### Features
+
+- **herdr**: Start the daemon outside the pane
+- **herdr**: Install the player from the plugin when it is missing
+- **herdr**: Add a plugin that drives the player from Herdr
+
 ## [1.1.0] - 2026-09-27
 
 ### Documentation
@@ -11,6 +28,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **tui**: Add self update and a background version-check notice
+
+### Release
+
+- V1.1.0
 
 ## [1.0.3] - 2026-09-27
 
