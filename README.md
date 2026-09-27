@@ -131,14 +131,6 @@ max_concurrent_downloads = 2
 | `state.json` and `daemon.log`      | `~/.local/state/mfp`                                                    | `$MFP_STATE_DIR`  |
 | Daemon socket                      | `$XDG_RUNTIME_DIR/mfp/daemon.sock`, else `$TMPDIR/mfp-$UID/daemon.sock` | `$MFP_SOCKET`     |
 
-## Layout
-
-| Crate        | What it holds                                                           |
-| ------------ | ----------------------------------------------------------------------- |
-| `mfp-core`   | Episode and catalog model, the wire protocol, config, every path        |
-| `mfp-daemon` | Audio engine, streaming and downloads, the socket server, durable state |
-| `mfp-tui`    | The `mfp` binary: argument parsing, the socket client, the interface    |
-
 ## Acknowledgements
 
 [musicforprogramming.net](https://musicforprogramming.net) is a wonderful project, and this player exists only because of it - all credit for the music and the curation goes to the people behind the site.

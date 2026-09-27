@@ -57,6 +57,17 @@ Concrete examples, API sketches, UI mockups, or references are helpful when rele
 
 ## Code Contributions
 
+### Layout
+
+| Crate        | What it holds                                                           |
+| ------------ | ----------------------------------------------------------------------- |
+| `mfp-core`   | Episode and catalog model, the wire protocol, config, every path        |
+| `mfp-daemon` | Audio engine, streaming and downloads, the socket server, durable state |
+| `mfp-tui`    | The `mfp` binary: argument parsing, the socket client, the interface    |
+
+The workspace is these three crates; `plugins/herdr/mfp.player` sits outside it, so `just check`
+does not cover it.
+
 ### Local Development
 
 This project needs a Rust toolchain (`cargo`) matching `rust-toolchain.toml`, and `libasound2-dev` on Linux - `rodio` links against ALSA. macOS needs nothing beyond the toolchain.
