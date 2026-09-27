@@ -84,7 +84,7 @@ fn too_small(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
                     .add_modifier(Modifier::BOLD),
             ),
             Line::styled(
-                format!("needs {MIN_WIDTH}x{MIN_HEIGHT}"),
+                format!("Needs {MIN_WIDTH}x{MIN_HEIGHT}"),
                 Style::default().fg(theme.faint),
             ),
         ])

@@ -95,7 +95,7 @@ pub fn write(path: &Path, catalog: &Catalog) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let document = serde_json::to_string_pretty(catalog).map_err(|error| {
-        Error::Internal(format!("the catalog could not be serialised: {error}"))
+        Error::Internal(format!("The catalog could not be serialised: {error}"))
     })?;
     let partial = path.with_extension("json.tmp");
     std::fs::write(&partial, document)?;

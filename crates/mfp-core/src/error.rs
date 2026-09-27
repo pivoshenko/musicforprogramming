@@ -75,34 +75,34 @@ impl std::fmt::Display for ErrorCode {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("invalid request: {0}")]
+    #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
-    #[error("unknown command: {0}")]
+    #[error("Unknown command: {0}")]
     UnknownCommand(String),
 
-    #[error("invalid parameters: {0}")]
+    #[error("Invalid parameters: {0}")]
     InvalidParams(String),
 
-    #[error("no episode with identifier {0}")]
+    #[error("No episode with identifier {0}")]
     UnknownEpisode(String),
 
-    #[error("nothing is loaded")]
+    #[error("Nothing is loaded")]
     NotPlaying,
 
-    #[error("the current source does not support seeking")]
+    #[error("The current source does not support seeking")]
     SeekUnsupported,
 
-    #[error("playback failed: {0}")]
+    #[error("Playback failed: {0}")]
     PlaybackFailed(String),
 
-    #[error("catalog unavailable: {0}")]
+    #[error("Catalog unavailable: {0}")]
     CatalogUnavailable(String),
 
-    #[error("download failed: {0}")]
+    #[error("Download failed: {0}")]
     DownloadFailed(String),
 
-    #[error("no download in progress for {0}")]
+    #[error("No download in progress for {0}")]
     DownloadNotActive(String),
 
     #[error("{required_bytes} bytes are required but only {available_bytes} are free")]

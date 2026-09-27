@@ -156,7 +156,7 @@ impl Command {
                 (Some(position), None) => seek_within_range(*position, 0.0),
                 (None, Some(delta)) => seek_within_range(*delta, -SEEK_SECS_LIMIT),
                 _ => Err(Error::InvalidParams(
-                    "seek takes exactly one of position_secs or delta_secs".into(),
+                    "Seek takes exactly one of position_secs or delta_secs".into(),
                 )),
             },
             _ => Ok(()),
@@ -532,7 +532,7 @@ pub fn parse_request(line: &str) -> std::result::Result<Request, RequestError> {
     let object = value.as_object().ok_or_else(|| {
         reject(
             None,
-            Error::InvalidRequest("a request must be a JSON object".into()),
+            Error::InvalidRequest("A request must be a JSON object".into()),
         )
     })?;
 
@@ -542,14 +542,14 @@ pub fn parse_request(line: &str) -> std::result::Result<Request, RequestError> {
         .ok_or_else(|| {
             reject(
                 None,
-                Error::InvalidRequest("a request must carry a numeric id".into()),
+                Error::InvalidRequest("A request must carry a numeric id".into()),
             )
         })?;
 
     let cmd = object.get("cmd").ok_or_else(|| {
         reject(
             Some(id),
-            Error::InvalidRequest("a request must carry a cmd object".into()),
+            Error::InvalidRequest("A request must carry a cmd object".into()),
         )
     })?;
 
@@ -1154,7 +1154,7 @@ mod tests {
     fn an_error_response_serialises_to_the_shape_the_spec_names() {
         assert_eq!(
             serde_json::to_string(&Response::failure(Some(2), &Error::NotPlaying)).unwrap(),
-            r#"{"id":2,"error":{"code":"not_playing","message":"nothing is loaded"}}"#
+            r#"{"id":2,"error":{"code":"not_playing","message":"Nothing is loaded"}}"#
         );
     }
 

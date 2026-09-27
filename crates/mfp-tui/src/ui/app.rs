@@ -22,7 +22,7 @@ const STATUS_LINGER: Duration = Duration::from_millis(2200);
 const DEFAULT_PAGE: usize = 8;
 
 /// What the tracks pane shows for an episode with neither a listing nor a description.
-const NO_TRACKLIST: &str = "no track listing for this episode";
+const NO_TRACKLIST: &str = "No track listing for this episode";
 
 /// Which pane the list keys act on.
 ///
@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![TrackLine::Numbered(
-                "no track listing for this episode".to_owned()
+                "No track listing for this episode".to_owned()
             )]
         );
     }

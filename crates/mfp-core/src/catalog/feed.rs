@@ -23,7 +23,7 @@ pub async fn fetch(client: &reqwest::Client) -> Result<Vec<Episode>> {
 
     let status = response.status();
     if !status.is_success() {
-        return Err(unreachable(&format!("it returned HTTP {status}")));
+        return Err(unreachable(&format!("It returned HTTP {status}")));
     }
 
     let body = response
@@ -36,14 +36,14 @@ pub async fn fetch(client: &reqwest::Client) -> Result<Vec<Episode>> {
 
 fn unreachable(reason: &str) -> Error {
     Error::CatalogUnavailable(format!(
-        "the feed at {} is unreachable: {reason}",
+        "The feed at {} is unreachable: {reason}",
         super::FEED_URL
     ))
 }
 
 fn malformed(reason: &str) -> Error {
     Error::Internal(format!(
-        "the feed at {} is not a valid RSS document: {reason}",
+        "The feed at {} is not a valid RSS document: {reason}",
         super::FEED_URL
     ))
 }
@@ -148,12 +148,12 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
     }
 
     if !saw_rss {
-        return Err(malformed("it has no <rss> or <channel> element"));
+        return Err(malformed("It has no <rss> or <channel> element"));
     }
     // an error page rendered as RSS parses, and a catalog built from it would be cached
     // over the good one for the whole of the cache's lifetime
     if episodes.is_empty() {
-        return Err(malformed("it lists no episode with an audio enclosure"));
+        return Err(malformed("It lists no episode with an audio enclosure"));
     }
 
     Ok(episodes)

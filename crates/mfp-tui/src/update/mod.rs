@@ -72,7 +72,7 @@ fn client(timeout: Duration) -> Result<reqwest::blocking::Client> {
         .user_agent(USER_AGENT)
         .timeout(timeout)
         .build()
-        .context("cannot build an HTTP client")
+        .context("Cannot build an HTTP client")
 }
 
 /// Asks GitHub for the latest release. A pre-release is not "latest" to that endpoint, so
@@ -83,7 +83,7 @@ pub fn fetch_latest_release() -> Result<Release> {
         .get(&url)
         .header("Accept", "application/vnd.github+json")
         .send()
-        .context("cannot reach api.github.com")?;
+        .context("Cannot reach api.github.com")?;
 
     // The endpoint answers 404 for a repository with no releases at all, which is a
     // different thing from a request GitHub turned away
@@ -95,8 +95,8 @@ pub fn fetch_latest_release() -> Result<Release> {
         .error_for_status()
         .context("GitHub refused the request for the latest release")?
         .text()
-        .context("cannot read the release response")?;
-    serde_json::from_str(&body).context("cannot parse the release response")
+        .context("Cannot read the release response")?;
+    serde_json::from_str(&body).context("Cannot parse the release response")
 }
 
 /// Whether `latest` is a later `major.minor.patch` than `current`.
@@ -195,7 +195,7 @@ fn classify(path: &str) -> InstallMethod {
 /// found neither way is not hunted down on `PATH`: replacing a binary this process only
 /// guessed at is worse than leaving it to the next `mfp` run to report.
 fn targets() -> Result<Vec<(&'static str, PathBuf)>> {
-    let mfp = std::env::current_exe().context("cannot locate the running executable")?;
+    let mfp = std::env::current_exe().context("Cannot locate the running executable")?;
     let daemon = match std::env::var("MFP_DAEMON") {
         Ok(path) if !path.is_empty() => PathBuf::from(path),
         _ => mfp.with_file_name("mfp-daemon"),
@@ -248,7 +248,7 @@ fn update(check: bool, json: bool) -> Result<u8> {
     let method = detect_install_method();
     if method != InstallMethod::Installer {
         bail!(
-            "this copy was installed with {}; run `{}` instead",
+            "This copy was installed with {}; run `{}` instead",
             method.installer_name(),
             method.upgrade_command()
         );
@@ -258,10 +258,10 @@ fn update(check: bool, json: bool) -> Result<u8> {
     let archive = archive_name(&target);
     let asset = release
         .asset(&archive)
-        .ok_or_else(|| anyhow!("release v{latest} ships no archive for {target}"))?;
+        .ok_or_else(|| anyhow!("Release v{latest} ships no archive for {target}"))?;
     let checksums = release
         .asset("checksums.txt")
-        .ok_or_else(|| anyhow!("release v{latest} ships no checksums.txt"))?;
+        .ok_or_else(|| anyhow!("Release v{latest} ships no checksums.txt"))?;
 
     let destinations = targets()?;
 
@@ -271,9 +271,9 @@ fn update(check: bool, json: bool) -> Result<u8> {
 
     let http = client(DOWNLOAD_TIMEOUT)?;
     let body = install::download(&http, &asset.browser_download_url)
-        .with_context(|| format!("cannot download {archive}"))?;
+        .with_context(|| format!("Cannot download {archive}"))?;
     let expected = install::download(&http, &checksums.browser_download_url)
-        .context("cannot download checksums.txt")?;
+        .context("Cannot download checksums.txt")?;
     let expected = String::from_utf8(expected).context("checksums.txt is not text")?;
     install::verify(&body, &archive, &expected)?;
     if !json {
@@ -315,7 +315,7 @@ fn report(json: bool, latest: &str, status: &'static str) -> Result<()> {
         latest_version: latest.to_string(),
         status,
     })
-    .context("cannot render the outcome as JSON")?;
+    .context("Cannot render the outcome as JSON")?;
     println!("{line}");
     Ok(())
 }

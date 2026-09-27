@@ -46,7 +46,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unreachable(message) => write!(f, "the daemon is unreachable: {message}"),
+            Self::Unreachable(message) => write!(f, "The daemon is unreachable: {message}"),
             Self::Rejected(error) => write!(f, "{}", error.message),
         }
     }
@@ -124,7 +124,7 @@ impl Client {
                     return response.result.ok_or_else(|| {
                         ClientError::Rejected(ErrorObject {
                             code: ErrorCode::Internal,
-                            message: "the daemon answered with neither a result nor an error"
+                            message: "The daemon answered with neither a result nor an error"
                                 .into(),
                         })
                     });
@@ -140,7 +140,7 @@ impl Client {
             ResultBody::State { state } => Ok(state),
             _ => Err(ClientError::Rejected(ErrorObject {
                 code: ErrorCode::Internal,
-                message: "the daemon answered status without a snapshot".into(),
+                message: "The daemon answered status without a snapshot".into(),
             })),
         }
     }
@@ -152,7 +152,7 @@ impl Client {
             ResultBody::Catalog { catalog } => Ok(catalog),
             _ => Err(ClientError::Rejected(ErrorObject {
                 code: ErrorCode::Internal,
-                message: "the daemon answered list_catalog without a catalog".into(),
+                message: "The daemon answered list_catalog without a catalog".into(),
             })),
         }
     }
@@ -231,7 +231,7 @@ impl Client {
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|_| "the daemon log".into());
                 return Err(ClientError::Unreachable(format!(
-                    "started {} but it did not accept a connection on {} within {:?}; see {log}",
+                    "Started {} but it did not accept a connection on {} within {:?}; see {log}",
                     daemon.display(),
                     socket.display(),
                     AUTOSTART_TIMEOUT
@@ -263,7 +263,7 @@ impl Client {
             let now = Instant::now();
             if now >= deadline {
                 return Err(ClientError::Unreachable(format!(
-                    "no answer within {:?}",
+                    "No answer within {:?}",
                     self.timeout
                 )));
             }
@@ -279,7 +279,7 @@ impl Client {
         let mut chunk = [0u8; 4096];
         match self.stream.read(&mut chunk) {
             Ok(0) => Err(ClientError::Unreachable(
-                "the daemon closed the connection".into(),
+                "The daemon closed the connection".into(),
             )),
             Ok(read) => {
                 self.pending.extend_from_slice(&chunk[..read]);
@@ -322,7 +322,7 @@ impl Client {
     fn parse_line(&self, line: &str) -> Result<Frame, ClientError> {
         serde_json::from_str(line).map_err(|error| {
             ClientError::Unreachable(format!(
-                "the daemon sent a frame this client cannot read: {error}"
+                "The daemon sent a frame this client cannot read: {error}"
             ))
         })
     }
@@ -361,7 +361,7 @@ fn reap_finished(children: &mut Vec<std::process::Child>) {
 /// survives this process and can never write over the interface.
 fn spawn_daemon(program: &Path) -> Result<(), ClientError> {
     let log = paths::log_file().map_err(|error| {
-        ClientError::Unreachable(format!("cannot resolve the log file: {error}"))
+        ClientError::Unreachable(format!("Cannot resolve the log file: {error}"))
     })?;
     if let Some(parent) = log.parent() {
         std::fs::create_dir_all(parent)
@@ -384,7 +384,7 @@ fn spawn_daemon(program: &Path) -> Result<(), ClientError> {
         .spawn()
         .map_err(|error| {
             ClientError::Unreachable(format!(
-                "cannot start {}: {error}; see {}",
+                "Cannot start {}: {error}; see {}",
                 program.display(),
                 log.display()
             ))

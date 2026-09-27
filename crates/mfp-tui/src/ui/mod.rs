@@ -58,7 +58,7 @@ pub fn run(mut client: Client) -> Result<()> {
     let mut app = App::new(catalog, snapshot);
     app.update = crate::update::notice::available();
     if app.catalog.episodes.is_empty() {
-        app.complain("the daemon has no catalog yet");
+        app.complain("The daemon has no catalog yet");
     }
 
     let mut terminal = ratatui::try_init()?;
@@ -157,7 +157,7 @@ fn event_loop(
                 Err(_) => {
                     if !app.disconnected {
                         app.disconnected = true;
-                        app.complain("lost the daemon, retrying");
+                        app.complain("Lost the daemon, retrying");
                         dirty = true;
                     }
                     break;
@@ -487,7 +487,7 @@ fn seek(client: &mut Client, app: &mut App, delta: f64) {
         return;
     }
     if !app.snapshot.seekable {
-        app.complain("this episode cannot be sought yet");
+        app.complain("This episode cannot be sought yet");
         return;
     }
     send(

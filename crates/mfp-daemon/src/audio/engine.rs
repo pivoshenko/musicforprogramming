@@ -119,7 +119,7 @@ impl AudioEngine {
                 Err(error)
             }
             Err(_) => Err(Error::PlaybackFailed(
-                "the audio thread ended before it started".into(),
+                "The audio thread ended before it started".into(),
             )),
         }
     }
@@ -128,7 +128,7 @@ impl AudioEngine {
     pub fn send(&self, command: AudioCommand) -> Result<()> {
         self.commands
             .send(command)
-            .map_err(|_| Error::PlaybackFailed("the audio thread is gone".into()))
+            .map_err(|_| Error::PlaybackFailed("The audio thread is gone".into()))
     }
 
     /// Stops audio and joins the thread.
@@ -164,10 +164,10 @@ struct Output {
 impl Output {
     fn open_device() -> Result<Self> {
         let builder = rodio::DeviceSinkBuilder::from_default_device()
-            .map_err(|error| Error::PlaybackFailed(format!("no audio output device: {error}")))?;
+            .map_err(|error| Error::PlaybackFailed(format!("No audio output device: {error}")))?;
         let mut sink = builder
             .open_stream()
-            .map_err(|error| Error::PlaybackFailed(format!("no audio output stream: {error}")))?;
+            .map_err(|error| Error::PlaybackFailed(format!("No audio output stream: {error}")))?;
         // Returns `()`, so it cannot be chained off `open_stream()?`. Without it the
         // drop-time warning goes to stderr and corrupts a terminal interface sharing it
         sink.log_on_drop(false);

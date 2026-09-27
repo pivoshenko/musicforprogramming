@@ -467,7 +467,7 @@ fn write_atomically(path: &Path, session: &SessionState) -> Result<()> {
     std::fs::create_dir_all(parent)?;
 
     let json = serde_json::to_vec_pretty(session)
-        .map_err(|error| Error::Internal(format!("could not serialise state: {error}")))?;
+        .map_err(|error| Error::Internal(format!("Could not serialise state: {error}")))?;
 
     // deliberately not `state.json`, so a half-written one is never loaded as the state
     let temp = path.with_extension("json.tmp");

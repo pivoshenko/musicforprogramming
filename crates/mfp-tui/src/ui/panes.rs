@@ -85,8 +85,8 @@ pub fn catalog(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if app.matches.is_empty() {
         let theme = app.theme();
         let message = match app.query.is_empty() {
-            true => "no episodes yet",
-            false => "nothing matches",
+            true => "No episodes yet",
+            false => "Nothing matches",
         };
         frame.render_widget(
             Paragraph::new(message)

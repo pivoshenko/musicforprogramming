@@ -207,7 +207,7 @@ fn usage_error(message: &str) -> u8 {
 fn report_client_error(error: &ClientError) -> u8 {
     match error {
         ClientError::Unreachable(message) => {
-            eprintln!("the daemon is unreachable: {message}");
+            eprintln!("The daemon is unreachable: {message}");
             EXIT_UNREACHABLE
         }
         ClientError::Rejected(object) => {
@@ -313,7 +313,7 @@ fn report_status_error(error: &ClientError, json: bool) -> u8 {
             if json {
                 println!("{}", unreachable_json(message));
             } else {
-                eprintln!("the daemon is unreachable: {message}");
+                eprintln!("The daemon is unreachable: {message}");
             }
             EXIT_UNREACHABLE
         }
@@ -327,7 +327,7 @@ fn report_status_error(error: &ClientError, json: bool) -> u8 {
 /// Reports a `--json` document that could not be built. Nothing goes to stdout, so no
 /// caller parses half a document as a whole one.
 fn report_serialisation_error(error: &serde_json::Error, what: &str) -> u8 {
-    eprintln!("cannot render {what} as JSON: {error}");
+    eprintln!("Cannot render {what} as JSON: {error}");
     EXIT_REJECTED
 }
 

@@ -154,7 +154,7 @@ fn a_narrow_frame_drops_the_track_listing_rather_than_squeezing_it() {
 fn a_frame_too_small_to_use_says_so_rather_than_drawing_a_mangled_one() {
     let frame = render(&mut app(), 20, 6);
     assert!(frame.contains("mfp"));
-    assert!(frame.contains("needs"));
+    assert!(frame.contains("Needs"));
 }
 
 #[test]

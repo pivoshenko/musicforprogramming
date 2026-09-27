@@ -23,12 +23,12 @@ pub fn download(http: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> 
     let response = http
         .get(url)
         .send()
-        .context("the download could not be started")?
+        .context("The download could not be started")?
         .error_for_status()
-        .context("the download was refused")?;
+        .context("The download was refused")?;
     Ok(response
         .bytes()
-        .context("the download was cut short")?
+        .context("The download was cut short")?
         .to_vec())
 }
 
@@ -67,7 +67,7 @@ pub fn replace(archive: &[u8], destinations: &[(&str, PathBuf)]) -> Result<()> {
         for (name, destination) in destinations {
             let source = extract(archive, name)?;
             let path = stage(&source, destination)
-                .with_context(|| format!("cannot write beside {}", destination.display()))?;
+                .with_context(|| format!("Cannot write beside {}", destination.display()))?;
             staged.push((path, destination));
         }
         Ok(())
@@ -82,7 +82,7 @@ pub fn replace(archive: &[u8], destinations: &[(&str, PathBuf)]) -> Result<()> {
 
     for (path, destination) in &staged {
         fs::rename(path, destination)
-            .with_context(|| format!("cannot replace {}", destination.display()))?;
+            .with_context(|| format!("Cannot replace {}", destination.display()))?;
     }
     Ok(())
 }
@@ -93,9 +93,9 @@ pub fn replace(archive: &[u8], destinations: &[(&str, PathBuf)]) -> Result<()> {
 /// is a name to look for here, not a destination to obey.
 fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>> {
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
-    for entry in tar.entries().context("the archive could not be read")? {
-        let mut entry = entry.context("the archive is damaged")?;
-        let path = entry.path().context("the archive has an unreadable path")?;
+    for entry in tar.entries().context("The archive could not be read")? {
+        let mut entry = entry.context("The archive is damaged")?;
+        let path = entry.path().context("The archive has an unreadable path")?;
         if path.file_name().is_none_or(|file| file != name) {
             continue;
         }
@@ -105,10 +105,10 @@ fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>> {
         let mut bytes = Vec::with_capacity(entry.size() as usize);
         entry
             .read_to_end(&mut bytes)
-            .with_context(|| format!("cannot read {name} out of the archive"))?;
+            .with_context(|| format!("Cannot read {name} out of the archive"))?;
         return Ok(bytes);
     }
-    Err(anyhow!("the archive does not contain {name}"))
+    Err(anyhow!("The archive does not contain {name}"))
 }
 
 /// Writes `bytes` executable beside `destination`, where a rename onto it cannot cross a

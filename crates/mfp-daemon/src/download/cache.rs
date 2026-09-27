@@ -170,7 +170,7 @@ pub fn free_space(dir: &Path) -> Result<u64> {
     while !probe.exists() {
         probe = probe.parent().ok_or_else(|| {
             Error::Internal(format!(
-                "no existing ancestor of {} to measure free space on",
+                "No existing ancestor of {} to measure free space on",
                 dir.display()
             ))
         })?;

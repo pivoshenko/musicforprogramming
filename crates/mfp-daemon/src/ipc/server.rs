@@ -361,7 +361,7 @@ async fn serve_connection(
                         let refusal = Response::failure(
                             None,
                             &Error::InvalidParams(format!(
-                                "a request line may hold at most {MAX_REQUEST_BYTES} bytes"
+                                "A request line may hold at most {MAX_REQUEST_BYTES} bytes"
                             )),
                         );
                         if write_line(&mut writer, &refusal).await.is_err() {
@@ -708,7 +708,7 @@ impl DaemonPlayer {
 
     fn catalog(&self) -> Result<&Catalog> {
         self.catalog.as_ref().ok_or_else(|| {
-            Error::CatalogUnavailable("no catalog is available from cache or network".into())
+            Error::CatalogUnavailable("No catalog is available from cache or network".into())
         })
     }
 
@@ -830,7 +830,7 @@ impl Player for DaemonPlayer {
             None => catalog
                 .episodes
                 .first()
-                .ok_or_else(|| Error::CatalogUnavailable("the catalog is empty".into()))?,
+                .ok_or_else(|| Error::CatalogUnavailable("The catalog is empty".into()))?,
         };
         self.load(episode)
     }

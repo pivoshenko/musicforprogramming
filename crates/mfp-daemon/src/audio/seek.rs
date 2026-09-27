@@ -133,7 +133,7 @@ fn position(opened: OpenSource, target_secs: f64) -> Result<Chain> {
         seekable,
     } = opened;
     let mut decoder = rodio::Decoder::new(reader)
-        .map_err(|error| Error::PlaybackFailed(format!("could not decode the audio: {error}")))?;
+        .map_err(|error| Error::PlaybackFailed(format!("Could not decode the audio: {error}")))?;
 
     if target_secs > 0.0 {
         if !seekable {
@@ -141,7 +141,7 @@ fn position(opened: OpenSource, target_secs: f64) -> Result<Chain> {
         }
         decoder.try_seek(target).map_err(|error| {
             Error::PlaybackFailed(format!(
-                "could not position the decoder at {target_secs:.0}s: {error}"
+                "Could not position the decoder at {target_secs:.0}s: {error}"
             ))
         })?;
     }

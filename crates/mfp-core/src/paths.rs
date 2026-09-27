@@ -21,7 +21,7 @@ fn env_var(key: &str) -> Option<String> {
 fn home_dir() -> Result<PathBuf> {
     directories::BaseDirs::new()
         .map(|dirs| dirs.home_dir().to_path_buf())
-        .ok_or_else(|| Error::Internal("cannot determine the home directory".into()))
+        .ok_or_else(|| Error::Internal("Cannot determine the home directory".into()))
 }
 
 fn current_uid() -> u32 {
@@ -146,7 +146,7 @@ pub fn ensure_socket_dir(socket_path: &Path) -> Result<()> {
 
     let dir = socket_path.parent().ok_or_else(|| {
         Error::Internal(format!(
-            "socket path {} has no parent directory",
+            "Socket path {} has no parent directory",
             socket_path.display()
         ))
     })?;
