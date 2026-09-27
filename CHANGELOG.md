@@ -2,11 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-09-27
+
+### Documentation
+
+- **readme**: Drop cargo from the installation methods
+
+### Features
+
+- **tui**: Add self update and a background version-check notice
+
 ## [1.0.3] - 2026-09-27
 
 ### CI/CD
 
 - Install the arm64 sysroot for the cross build
+
+### Release
+
+- V1.0.3
 
 ## [1.0.2] - 2026-09-27
 
