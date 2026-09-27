@@ -1221,7 +1221,12 @@ mod tests {
         harness.playing_at(0.0);
     }
 
+    /// Requires an audio output device: the assertion is that playback reaches the end
+    /// of the fixture within [`SETTLE`], and a host with no device does not drain the
+    /// stream at wall-clock rate. Not run by default:
+    /// `cargo test -p mfp-daemon -- --ignored`.
     #[test]
+    #[ignore = "requires an audio output device"]
     fn the_end_of_the_audio_stops_playback_without_advancing_to_anything_else() {
         let harness = Harness::new();
         // Loading close to the end keeps the wait short; the fixture runs six seconds
