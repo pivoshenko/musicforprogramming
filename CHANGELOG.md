@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-09-27
+
+### CI/CD
+
+- Install the cross target under the pinned toolchain
+
 ## [1.0.1] - 2026-09-27
 
 ### CI/CD
@@ -13,6 +19,10 @@ All notable changes to this project will be documented in this file.
 - **readme**: Credit musicforprogramming.net and note the unofficial status
 - **readme**: Recolour the badges to the brand palette
 - Serve the installer from pivoshenko.dev/mfp.sh
+
+### Release
+
+- V1.0.1
 
 ## [1.0.0] - 2026-09-27
 
