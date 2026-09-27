@@ -23,7 +23,7 @@ A terminal player for [musicforprogramming.net](https://musicforprogramming.net)
 ### Standalone Installer
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/scripts/install.sh | sh
+curl -fsSL https://pivoshenko.dev/mfp.sh | sh
 ```
 
 ### Homebrew

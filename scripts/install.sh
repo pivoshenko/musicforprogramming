@@ -3,7 +3,7 @@
 # https://github.com/pivoshenko/musicforprogramming
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/scripts/install.sh | sh
+#   curl -fsSL https://pivoshenko.dev/mfp.sh | sh
 #
 # Environment variables:
 #   MFP_VERSION     - version tag to install (default: latest release)
