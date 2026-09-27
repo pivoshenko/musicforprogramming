@@ -7,6 +7,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"
+repository = "https://github.com/pivoshenko/musicforprogramming"
+homepage = "https://github.com/pivoshenko/musicforprogramming"
+keywords = ["music", "player", "terminal", "tui", "audio"]
+categories = ["command-line-utilities", "multimedia::audio"]
 
 # Enforced by `cargo clippy --workspace --all-targets -- -D warnings`, which CI runs on
 # every pull request. Each crate opts in with `[lints] workspace = true`.

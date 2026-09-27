@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Terminal interface and headless CLI for the musicforprogramming player"
 
 # The interface and the headless transport commands are one binary: `mfp` with no
