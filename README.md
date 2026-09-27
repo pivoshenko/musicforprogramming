@@ -115,3 +115,9 @@ max_concurrent_downloads = 2
 | `mfp-core`   | Episode and catalog model, the wire protocol, config, every path        |
 | `mfp-daemon` | Audio engine, streaming and downloads, the socket server, durable state |
 | `mfp-tui`    | The `mfp` binary: argument parsing, the socket client, the interface    |
+
+## Acknowledgements
+
+[musicforprogramming.net](https://musicforprogramming.net) is a wonderful project, and this player exists only because of it - all credit for the music and the curation goes to the people behind the site.
+
+This is an unofficial, independent client: it is not affiliated with, endorsed by, or connected to musicforprogramming.net in any way.
