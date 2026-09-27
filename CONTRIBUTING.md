@@ -62,18 +62,18 @@ Concrete examples, API sketches, UI mockups, or references are helpful when rele
 This project needs a Rust toolchain (`cargo`) matching `rust-toolchain.toml`, and `libasound2-dev` on Linux - `rodio` links against ALSA. macOS needs nothing beyond the toolchain.
 This project uses [`just`](https://github.com/casey/just) as its task runner. Run `just --list` for the full set; these are the ones you need day to day:
 
-| Command | What it does |
-| --- | --- |
-| `install` | Fetches the crate dependencies into the cargo cache |
-| `format` | Reformats the Rust sources in place |
-| `lint` | Lints every target with Clippy, failing on any warning |
-| `audit` | Checks licences, advisories, and banned crates with cargo-deny |
-| `test` | Runs the workspace test suite |
-| `check` | Runs `lint`, `audit`, `test`, and `build` |
-| `update` | Upgrades the lockfile to the newest compatible versions |
-| `build` | Builds the optimized release binaries |
-| `run` | Runs the interface from the working tree |
-| `generate-changelog` | Regenerates `CHANGELOG.md` from the commit history with git-cliff |
+| Command                   | What it does                                                             |
+| ------------------------- | ------------------------------------------------------------------------ |
+| `install`                 | Fetches the crate dependencies into the cargo cache                      |
+| `format`                  | Reformats the Rust sources in place                                      |
+| `lint`                    | Lints every target with Clippy, failing on any warning                   |
+| `audit`                   | Checks licences, advisories, and banned crates with cargo-deny           |
+| `test`                    | Runs the workspace test suite                                            |
+| `check`                   | Runs `lint`, `audit`, `test`, and `build`                                |
+| `update`                  | Upgrades the lockfile to the newest compatible versions                  |
+| `build`                   | Builds the optimized release binaries                                    |
+| `run`                     | Runs the interface from the working tree                                 |
+| `generate-changelog`      | Regenerates `CHANGELOG.md` from the commit history with git-cliff        |
 | `generate-social-preview` | Rasterizes the social preview SVG into a 1280x640 PNG via `rsvg-convert` |
 
 1. Fork the repository and create a branch for your change
@@ -99,10 +99,10 @@ The lint set in `Cargo.toml` is deliberately narrow: lints that catch a defect, 
 
 Workflows live in `.github/workflows`:
 
-| Workflow | Trigger | What it does |
-| --- | --- | --- |
-| CI | Push to `main`, pull requests, `workflow_dispatch` | `ci-rs` runs on `ubuntu-24.04-arm` and `macos-15`: stable toolchain with rustfmt and Clippy over a cached cargo registry, ALSA headers on Linux, then format check, lint, test, and build. `audit` runs cargo-deny on `ubuntu-24.04-arm`. There is no Windows leg - the client speaks over a Unix domain socket |
-| Release | `workflow_dispatch` (optional `version` input) | Five chained jobs: `tag` resolves the next version from the commit history with git-cliff or from the optional input, bumps `Cargo.toml` and the lockfile, regenerates `CHANGELOG.md`, then commits and pushes `main` with the `v<version>` tag; `build` cross-compiles release binaries for four targets (`x86_64` and `aarch64`, each for `unknown-linux-gnu` and `apple-darwin`), packaging `mfp` and `mfp-daemon` into a per-target `.tar.gz`; `release` publishes the GitHub Release with the generated notes, every archive, and a `checksums.txt`; then `publish-crates` publishes `mfp-core`, `mfp-daemon`, and `mfp-tui` to Crates.io in dependency order, and `update-homebrew` pushes a refreshed `Formula/musicforprogramming.rb` to `pivoshenko/homebrew-tap` |
+| Workflow | Trigger                                            | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CI       | Push to `main`, pull requests, `workflow_dispatch` | `ci-rs` runs on `ubuntu-24.04-arm` and `macos-15`: stable toolchain with rustfmt and Clippy over a cached cargo registry, ALSA headers on Linux, then format check, lint, test, and build. `audit` runs cargo-deny on `ubuntu-24.04-arm`. There is no Windows leg - the client speaks over a Unix domain socket                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Release  | `workflow_dispatch` (optional `version` input)     | Five chained jobs: `tag` resolves the next version from the commit history with git-cliff or from the optional input, bumps `Cargo.toml` and the lockfile, regenerates `CHANGELOG.md`, then commits and pushes `main` with the `v<version>` tag; `build` cross-compiles release binaries for four targets (`x86_64` and `aarch64`, each for `unknown-linux-gnu` and `apple-darwin`), packaging `mfp` and `mfp-daemon` into a per-target `.tar.gz`; `release` publishes the GitHub Release with the generated notes, every archive, and a `checksums.txt`; then `publish-crates` publishes `mfp-core`, `mfp-daemon`, and `mfp-tui` to Crates.io in dependency order, and `update-homebrew` pushes a refreshed `Formula/musicforprogramming.rb` to `pivoshenko/homebrew-tap` |
 
 CI must be green before a pull request is merged.
 
@@ -139,7 +139,7 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 - **type** - one of the prefixes from the table below
 - **scope** - the crate, module, or command being changed (e.g. `audio`, `catalog`, `ipc`, `tui`, `download`, `seek`); omit when the change is truly cross-cutting
 - **subject** - imperative mood, lowercase, no trailing period, 72 characters or fewer
-- **body** - optional; use it to explain *why*, not *what*; wrap at 72 characters
+- **body** - optional; use it to explain _why_, not _what_; wrap at 72 characters
 
 **Type prefixes**
 
