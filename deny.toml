@@ -1,13 +1,9 @@
-# cargo-deny: run with `cargo deny check`. CI runs it on every pull request.
-
 [advisories]
 version = 2
 yanked = "deny"
 
 [licenses]
 version = 2
-# The workspace is MIT. These are the licences its dependency tree actually carries
-# (the table name is cargo-deny's own spelling)
 allow = [
   "MIT",
   "Apache-2.0",
@@ -19,10 +15,7 @@ allow = [
   "Zlib",
   "MPL-2.0",
   "CDLA-Permissive-2.0",
-  # Required by an AND clause rather than chosen: finl_unicode and wezterm-bidi
-  # carry Unicode-DFS-2016 alongside a permissive option, so it cannot be traded away
   "Unicode-DFS-2016",
-  # terminfo 0.9 offers nothing else
   "WTFPL",
 ]
 confidence-threshold = 0.9
