@@ -1,0 +1,29 @@
+[package]
+name = "mfp-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terminal interface and headless CLI for the musicforprogramming player"
+
+# The interface and the headless transport commands are one binary: `mfp` with no
+# subcommand draws the interface, `mfp pause` acts and exits.
+[[bin]]
+name = "mfp"
+path = "src/main.rs"
+
+[dependencies]
+mfp-core.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+libc.workspace = true
+ratatui.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

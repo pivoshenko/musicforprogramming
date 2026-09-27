@@ -1,0 +1,63 @@
+[workspace]
+resolver = "3"
+members = ["crates/mfp-core", "crates/mfp-daemon", "crates/mfp-tui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+
+# Enforced by `cargo clippy --workspace --all-targets -- -D warnings`, which CI runs on
+# every pull request. Each crate opts in with `[lints] workspace = true`.
+#
+# The set is deliberately narrow: lints that catch a defect, not lints that enforce a
+# house style. The pedantic and nursery groups produce ~450 hits here, almost all of them
+# cosmetic (unreadable_literal, must_use_candidate), and a gate nobody can keep green is a
+# gate that gets turned off.
+[workspace.lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_qualifications = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# A panic in production code should be a deliberate, annotated exception. Test code is
+# exempted per-crate, where unwrap is the right way to assert
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+# Every unsafe block states the contract it is upholding
+undocumented_unsafe_blocks = "deny"
+# Equality on a float is usually a bug; the one place it is not is annotated
+float_cmp = "deny"
+# Async correctness: a std guard held across an await deadlocks the runtime
+await_holding_lock = "deny"
+await_holding_invalid_type = "deny"
+redundant_clone = "deny"
+
+[workspace.dependencies]
+mfp-core = { path = "crates/mfp-core" }
+
+anyhow = "1.0.104"
+base64 = "0.22.1"
+clap = { version = "4.6.6", features = ["derive"] }
+crossterm = "0.29.0"
+directories = "6.0.0"
+libc = "0.2.189"
+quick-xml = "0.42.0"
+ratatui = "0.30.2"
+# reqwest 0.13 enables rustls through its default features; the feature is not called
+# `rustls-tls` as it was in 0.12
+reqwest = { version = "0.13.5", features = ["stream"] }
+rustfft = "6.4.0"
+rodio = "0.22.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+stream-download = { version = "0.24.4", features = ["reqwest-rustls"] }
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+toml = "1.1.5"
+toml_edit = "0.25.15"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
