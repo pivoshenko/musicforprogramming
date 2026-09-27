@@ -18,21 +18,23 @@
 
 A terminal player for [musicforprogramming.net](https://musicforprogramming.net), written in Rust.
 
-## Install
+## Overview
 
-### Standalone Installer
+### Install
+
+#### Standalone Installer
 
 ```sh
 curl -fsSL https://pivoshenko.dev/mfp.sh | sh
 ```
 
-### Homebrew
+#### Homebrew
 
 ```sh
 brew install pivoshenko/tap/musicforprogramming
 ```
 
-### From Source
+#### From Source
 
 Requires a Rust toolchain matching `rust-toolchain.toml` (stable, 1.96+), and `libasound2-dev` on Linux.
 
@@ -43,7 +45,17 @@ cargo install --path crates/mfp-tui
 
 Both binaries must be on `PATH`: `mfp` autostarts `mfp-daemon` when nothing is listening on the socket, looking for it beside itself and then on `PATH`. `$MFP_DAEMON` overrides that.
 
-## Use
+### Herdr
+
+[`plugins/herdr/mfp.player`](plugins/herdr/mfp.player) is a [Herdr](https://herdr.dev) plugin that opens the interface as a pane and puts the transport on actions.
+
+```sh
+herdr plugin install pivoshenko/musicforprogramming/plugins/herdr/mfp.player
+```
+
+Each action runs the player's own CLI and then reports where it left it, so a keypress is answered without opening anything: one key plays or stops, others move between episodes or say what is playing. See the [plugin's own README](plugins/herdr/mfp.player/README.md) for what it provides and for the keybindings to copy, which a plugin cannot ship itself.
+
+## Usage
 
 Run `mfp` with no arguments for the TUI and with a subcommand it prints one line and exits, so it composes with anything:
 
@@ -96,16 +108,6 @@ interface. `MFP_NO_UPDATE_CHECK=1` turns the check and the notice off.
 | `/`                 | Search                          |
 | `?`                 | Help                            |
 | `q`                 | Quit                            |
-
-## Herdr
-
-[`plugins/herdr/mfp.player`](plugins/herdr/mfp.player) is a [Herdr](https://herdr.dev) plugin that opens the interface as a pane and puts the transport on actions.
-
-```sh
-herdr plugin install pivoshenko/musicforprogramming/plugins/herdr/mfp.player
-```
-
-Each action runs this CLI and then reports where it left the player, so a keypress is answered without opening anything. It needs `mfp` on `PATH` and nothing else - see the [plugin's own README](plugins/herdr/mfp.player/README.md) for what it provides and for the keybindings to copy, which a plugin cannot ship itself.
 
 ## Configuration
 
