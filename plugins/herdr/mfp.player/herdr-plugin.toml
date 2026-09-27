@@ -12,11 +12,13 @@ platforms = ["linux", "macos"]
 [[build]]
 command = ["sh", "plugin/install-mfp.sh"]
 
+# Not `mfp` directly: it would autostart the daemon as a child of this pane, and closing the pane
+# would then kill playback. The script starts the daemon outside the pane first
 [[panes]]
 id = "player"
 title = "musicforprogramming"
 placement = "overlay"
-command = ["mfp"]
+command = ["sh", "plugin/open-player.sh"]
 
 # Not redundant with the pane above: a keybinding's `plugin_action` type takes an action id and
 # cannot target a pane entrypoint, so this is what a key reaches

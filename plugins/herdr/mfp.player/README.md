@@ -63,6 +63,18 @@ herdr plugin action invoke mfp.player.toggle
 herdr plugin action list --plugin mfp.player
 ```
 
+## Dismissing The Pane
+
+`prefix+x` - Herdr's own `close_pane` - dismisses it and leaves playback running. `q` inside the
+interface is the other thing entirely: quitting the player stops playback and ends the daemon with
+it, which is what quitting a player should mean.
+
+That only holds because the pane runs [`plugin/open-player.sh`](plugin/open-player.sh) rather than
+`mfp` directly. `mfp` autostarts the daemon, which would make the daemon a child of the pane, and
+closing the pane would take playback down with it. The script warms the daemon through a throwaway
+client first, so it is reparented outside the pane before the interface starts and the interface
+spawns nothing.
+
 ## Keybindings
 
 Plugin v1 declares no keys of its own, so these go in your own `config.toml`. Suggested defaults,
