@@ -7,6 +7,11 @@ description = "mfp.player - control the musicforprogramming.net player from Herd
 # through PermissionsExt, so there is no Windows build to drive
 platforms = ["linux", "macos"]
 
+# Every action shells out to the player, so make sure it is there. Detect-then-install: a
+# Homebrew or cargo copy is left alone, and a failure warns rather than aborting the install
+[[build]]
+command = ["sh", "plugin/install-mfp.sh"]
+
 [[panes]]
 id = "player"
 title = "musicforprogramming"

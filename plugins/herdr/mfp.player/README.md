@@ -112,12 +112,19 @@ a literal prefix key, and `config check` reports the binding as disabled.
 
 ## Requirements
 
-`mfp` and `mfp-daemon` must be on `PATH` - see the repository README for the install methods. The
-transport actions are the player's own CLI verbatim, and it autostarts the daemon when nothing is
-listening on the socket, so nothing here needs the player to already be running.
+`mfp` and `mfp-daemon` must be on `PATH`, and `node` must be too - every action but `open` runs a
+script. The player autostarts its daemon when nothing is listening on the socket, so nothing here
+needs it to already be running.
 
-Only `now-playing` needs a script, because a plugin command's stdout goes to the Herdr command log
-rather than to the screen. It reads `mfp status --json` and turns the result into a notification,
-reporting an unreachable daemon rather than failing silently.
+`herdr plugin install` handles the player for you: a `[[build]]` step runs
+[`plugin/install-mfp.sh`](plugin/install-mfp.sh), which installs it from
+<https://pivoshenko.dev/mfp.sh> only when `mfp` is not already on `PATH`, so a Homebrew or cargo copy
+is left alone. A failure there warns rather than aborting the install, because the actions already
+report a missing player at runtime.
+
+Two things that step cannot do. `herdr plugin link` skips build commands, so a linked development
+copy needs the player installed already. And the installer writes to `~/.local/bin`, which is not
+necessarily on the `PATH` the Herdr server hands to plugin commands - if the actions still report
+`mfp is not on PATH` afterwards, that is why, and Herdr needs restarting once it is.
 
 macOS and Linux only, which is what the player itself supports.
