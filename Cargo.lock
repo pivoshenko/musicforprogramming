@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "mfp-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.22.1",
  "directories",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "mfp-daemon"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "libc",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "mfp-tui"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",

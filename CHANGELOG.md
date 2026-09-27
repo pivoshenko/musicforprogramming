@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-09-27
+
+### CI/CD
+
+- Point the arm64 cross build at ports.ubuntu.com
+
+### Documentation
+
+- **readme**: Credit musicforprogramming.net and note the unofficial status
+- **readme**: Recolour the badges to the brand palette
+- Serve the installer from pivoshenko.dev/mfp.sh
+
 ## [1.0.0] - 2026-09-27
 
 ### Build
@@ -40,4 +52,8 @@ All notable changes to this project will be documented in this file.
 ### Testing
 
 - **audio**: Ignore the end-of-stream test without a device
+
+### Release
+
+- V1.0.0
 
