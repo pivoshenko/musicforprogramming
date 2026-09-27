@@ -32,13 +32,6 @@ curl -fsSL https://pivoshenko.dev/mfp.sh | sh
 brew install pivoshenko/tap/musicforprogramming
 ```
 
-### Cargo
-
-```sh
-cargo install mfp-daemon
-cargo install mfp-tui
-```
-
 ### From Source
 
 Requires a Rust toolchain matching `rust-toolchain.toml` (stable, 1.96+), and `libasound2-dev` on Linux.

@@ -135,28 +135,31 @@ fn archive_name(target: &str) -> String {
     format!("musicforprogramming-{target}.tar.gz")
 }
 
-/// How this copy was installed, which decides whether replacing the binaries is ours to do.
+/// Where this copy came from, which decides whether replacing the binaries is ours to do.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InstallMethod {
     /// Homebrew owns the files and records their hashes; writing over them breaks `brew`
     Homebrew,
-    /// Cargo built these from source, and a downloaded binary is not what it would produce
+    /// Built by cargo, which is no longer an installation this project offers. Still
+    /// recognised, because a copy in a cargo bin directory is one `self update` must not
+    /// write over: cargo built it from source and a downloaded binary is not what it
+    /// produced, whether or not anybody is told to install that way any more
     Cargo,
     /// The standalone installer, or a hand-placed copy: nothing else is tracking these
     Installer,
 }
 
 impl InstallMethod {
-    /// The command that upgrades a copy installed this way.
+    /// The command that upgrades a copy from this source.
     pub fn upgrade_command(&self) -> &'static str {
         match self {
             Self::Homebrew => "brew upgrade pivoshenko/tap/musicforprogramming",
-            Self::Cargo => "cargo install mfp-daemon mfp-tui",
+            Self::Cargo => "curl -fsSL https://pivoshenko.dev/mfp.sh | sh",
             Self::Installer => "mfp self update",
         }
     }
 
-    /// What installed this copy, as the refusal names it.
+    /// Where this copy came from, as the refusal names it.
     fn installer_name(&self) -> &'static str {
         match self {
             Self::Homebrew => "Homebrew",
@@ -407,11 +410,19 @@ mod tests {
                 .upgrade_command()
                 .starts_with("brew ")
         );
-        assert!(InstallMethod::Cargo.upgrade_command().starts_with("cargo "));
         assert_eq!(
             InstallMethod::Installer.upgrade_command(),
             "mfp self update"
         );
+    }
+
+    /// Cargo is no longer an installation this project offers, so a copy it built is sent to
+    /// one that is rather than told to reinstall the way it came.
+    #[test]
+    fn a_cargo_built_copy_is_pointed_at_a_supported_installation() {
+        let command = InstallMethod::Cargo.upgrade_command();
+        assert!(!command.starts_with("cargo "), "{command}");
+        assert!(command.contains("mfp.sh"), "{command}");
     }
 
     #[test]
