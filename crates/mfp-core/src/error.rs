@@ -1,8 +1,7 @@
 //! The crate error type and the stable machine-readable codes clients branch on.
 //!
-//! Every variant maps to exactly one [`ErrorCode`]. The codes are wire contract, defined
-//! in `specs/player-ipc/spec.md` and stable across releases; the human-readable messages
-//! are not, and must never be parsed.
+//! Every variant maps to exactly one [`ErrorCode`]. The codes are wire contract and stable
+//! across releases; the human-readable messages are not, and must never be parsed.
 
 use serde::{Deserialize, Serialize};
 

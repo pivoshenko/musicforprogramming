@@ -172,7 +172,7 @@ impl DownloadManager {
 
     /// Stops an in-progress transfer, leaving its bytes in the part file for a later resume.
     /// Fails with [`mfp_core::ErrorCode::DownloadNotActive`] when nothing is running for that
-    /// identifier, as `specs/player-ipc/spec.md` requires of the `cancel_download` command.
+    /// identifier, which is what the `cancel_download` command reports to a client.
     pub fn cancel(&self, id: &str) -> Result<()> {
         if self.request_cancel(id) {
             Ok(())

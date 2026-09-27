@@ -4,7 +4,7 @@
 //! analyser arithmetic unchanged: samples are downmixed to mono and Hann-windowed, a
 //! 2048-point transform is taken, the magnitudes are smoothed exponentially against the
 //! previous frame, and each is scaled linearly from [`SPECTRUM_MIN_DB`] to
-//! [`SPECTRUM_MAX_DB`] onto `0..=255`. See `design.md`.
+//! [`SPECTRUM_MAX_DB`] onto `0..=255`.
 
 use std::sync::Arc;
 

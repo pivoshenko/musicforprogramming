@@ -1,5 +1,4 @@
-//! The newline-delimited JSON wire protocol, exactly as `specs/player-ipc/spec.md` defines
-//! it.
+//! The newline-delimited JSON wire protocol. This module is its definition.
 //!
 //! One JSON value per line in both directions. A client writes [`Request`] lines and reads
 //! [`Frame`] lines, each either a [`Response`] echoing a request's `id` or an unsolicited
