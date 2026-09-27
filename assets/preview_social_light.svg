@@ -1,67 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  GitHub social preview (Open Graph card) for musicforprogramming, light theme.
-  Canvas: 1280x558 - the frame hugs the content at a 40px margin, so the README
-  card carries no dead space. Every colour is a role from
-  `crates/mfp-tui/src/ui/theme.rs`, so the card and the interface cannot drift.
-
-  The canvas is transparent so the README picks up the reader's GitHub theme;
-  `assets/preview_social_dark.svg` is the dark-theme twin, so geometry edits here
-  belong there too.
-
-  Share cards need a solid canvas at GitHub's recommended 1280x640, so the raster
-  pads the missing 82px back out. Run `just generate-social-preview` and upload the
-  PNG under Settings, Social preview, on GitHub.
--->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 558" width="1280" height="558" font-family="'JetBrainsMono Nerd Font Mono','JetBrainsMono NFM','Iosevka Nerd Font Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace">
-  <!-- pane border, in the interface's accent -->
-  <rect x="40" y="40" width="1200" height="478" fill="none" stroke="#5ca88a" stroke-width="4"/>
+  <text x="122" y="138" font-size="24" xml:space="preserve"><tspan fill="#e86ec7">-,.</tspan>                                                                     </text>
+  <text x="122" y="170" font-size="24" xml:space="preserve"><tspan fill="#9a958c">:::</tspan><tspan fill="#e8963c">,</tspan>                                                                    </text>
+  <text x="122" y="202" font-size="24" xml:space="preserve"><tspan fill="#9a958c">::::</tspan><tspan fill="#e8963c">*o</tspan>             <tspan fill="#e8963c">,</tspan> <tspan fill="#e8963c">.,•^:.</tspan>                                             </text>
+  <text x="122" y="234" font-size="24" xml:space="preserve"><tspan fill="#c9c5bf">...</tspan><tspan fill="#9a958c">:::</tspan><tspan fill="#d8d84a">'^</tspan>         <tspan fill="#d8d84a">:-</tspan><tspan fill="#9a958c">:</tspan><tspan fill="#d8d84a">'</tspan><tspan fill="#9a958c">::::::</tspan><tspan fill="#d8d84a">o:•__</tspan>           <tspan fill="#d8d84a">:</tspan> <tspan fill="#d8d84a">_:•*._</tspan>                     </text>
+  <text x="122" y="266" font-size="24" xml:space="preserve"><tspan fill="#c9c5bf">....</tspan><tspan fill="#9a958c">::::</tspan><tspan fill="#3fcf94">^•._o,o,-</tspan><tspan fill="#9a958c">:::::::::::::::</tspan><tspan fill="#3fcf94">.</tspan>   <tspan fill="#3fcf94">•_._:''</tspan><tspan fill="#9a958c">:</tspan><tspan fill="#3fcf94">'</tspan><tspan fill="#9a958c">::::::</tspan><tspan fill="#3fcf94">--'••</tspan>  <tspan fill="#3fcf94">_</tspan> <tspan fill="#3fcf94">:</tspan>   <tspan fill="#3fcf94">.*o-:•^^</tspan></text>
+  <text x="122" y="298" font-size="24" xml:space="preserve"><tspan fill="#c9c5bf">......</tspan><tspan fill="#9a958c">:::::::::::::</tspan><tspan fill="#c9c5bf">.</tspan><tspan fill="#9a958c">:</tspan><tspan fill="#c9c5bf">......</tspan><tspan fill="#9a958c">::::::</tspan><tspan fill="#3fcf94">'''</tspan><tspan fill="#9a958c">::::::::::::::::::::</tspan><tspan fill="#3fcf94">**</tspan><tspan fill="#9a958c">:</tspan><tspan fill="#3fcf94">'</tspan><tspan fill="#9a958c">:</tspan><tspan fill="#3fcf94">^^'</tspan><tspan fill="#9a958c">::::::::</tspan></text>
 
-  <!--
-    MFP wordmark - the binary's name, not the project's: nineteen letters will not
-    survive a block font at this size. Block width at font-size 40 in JetBrains Mono
-    is 26 cells x 24px = 624px, centred at x=328.
-
-    The mask cuts a 3px transparent line 3.5px under each baseline so the letters
-    read as stacked tiles rather than a solid slab. Seams sit at 127.5 + 46n, so
-    moving y or dy means moving the mask lines with them; dropping the mask
-    attribute restores the solid wordmark.
-  -->
-  <defs>
-    <mask id="wordmark-tiles" maskUnits="userSpaceOnUse" x="0" y="0" width="1280" height="558">
-      <rect width="1280" height="558" fill="#fff"/>
-      <g stroke="#000" stroke-width="3">
-        <line x1="320" y1="127.5" x2="960" y2="127.5"/>
-        <line x1="320" y1="173.5" x2="960" y2="173.5"/>
-        <line x1="320" y1="219.5" x2="960" y2="219.5"/>
-        <line x1="320" y1="265.5" x2="960" y2="265.5"/>
-        <line x1="320" y1="311.5" x2="960" y2="311.5"/>
-      </g>
-    </mask>
-  </defs>
-  <text x="328" y="124" fill="#5ca88a" font-size="40" font-weight="700" xml:space="preserve" mask="url(#wordmark-tiles)">
-    <tspan x="328" dy="0">███    ███ ███████ ██████ </tspan>
-    <tspan x="328" dy="46">████  ████ ██      ██   ██</tspan>
-    <tspan x="328" dy="46">██ ████ ██ █████   ██████ </tspan>
-    <tspan x="328" dy="46">██  ██  ██ ██      ██     </tspan>
-    <tspan x="328" dy="46">██      ██ ██      ██     </tspan>
-  </text>
-
-  <!-- tagline -->
   <text x="640" y="366" text-anchor="middle" font-size="26" letter-spacing="0.01em" xml:space="preserve">
     <tspan fill="#6b655f">A terminal player for </tspan><tspan fill="#2a2a28">musicforprogramming.net</tspan><tspan fill="#6b655f">, written in </tspan><tspan fill="#d4a85a">Rust</tspan><tspan fill="#6b655f">.</tspan>
   </text>
 
-  <!-- prompt + command -->
-  <text x="640" y="412" text-anchor="middle" font-size="24" xml:space="preserve">
-    <tspan fill="#d4a85a">❯</tspan><tspan fill="#2a2a28"> mfp </tspan><tspan fill="#5ca88a">play</tspan>
-  </text>
-
-  <!--
-    The analyser, coloured by how high a mark sits rather than by how loud its
-    column is - the same four-step ramp the spectrum pane uses
-  -->
-  <text x="640" y="456" text-anchor="middle" font-size="20" xml:space="preserve">
-    <tspan fill="#3fcf94">▁▂▃</tspan><tspan fill="#d8d84a">▅▆</tspan><tspan fill="#e8963c">▇</tspan><tspan fill="#e86ec7">█</tspan><tspan fill="#e8963c">▇</tspan><tspan fill="#d8d84a">▆▅</tspan><tspan fill="#3fcf94">▃▂▁</tspan><tspan fill="#6b655f">   0:42:18 / 1:04:12</tspan>
-  </text>
+  <text x="640" y="412" text-anchor="middle" font-size="20" fill="#6b655f">0:42:18 / 1:04:12</text>
 </svg>
