@@ -235,6 +235,22 @@ fn a_lost_daemon_is_said_so_in_the_header_rather_than_drawn_as_a_frozen_frame() 
 }
 
 #[test]
+fn an_available_update_is_named_in_the_header_and_absent_when_there_is_none() {
+    let mut app = app();
+    assert!(
+        !render(&mut app, 100, 30).contains("available"),
+        "a header with no update pending mentioned one"
+    );
+
+    app.update = Some("9.9.9".into());
+    let frame = render(&mut app, 100, 30);
+    let header = frame.lines().next().unwrap();
+
+    assert!(header.contains("update 9.9.9 available"), "{header}");
+    assert!(header.contains("musicforprogramming.net"), "{header}");
+}
+
+#[test]
 fn a_failed_download_is_marked_on_its_row_rather_than_reading_as_absent() {
     let mut app = app();
     app.snapshot.downloads = vec![DownloadProgress {

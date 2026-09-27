@@ -18,3 +18,4 @@
 pub mod cli;
 pub mod client;
 pub mod ui;
+pub mod update;

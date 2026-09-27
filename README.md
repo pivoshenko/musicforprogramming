@@ -67,6 +67,24 @@ mfp shutdown
 
 Exit codes: `0` ok, `1` the daemon rejected the command, `2` usage error, `3` the daemon was unreachable.
 
+### Update
+
+```sh
+mfp self update          # replace both binaries with the latest release
+mfp self update --check  # report whether one exists, install nothing
+mfp self update --json   # the same as a document
+```
+
+`self update` downloads the release archive for this target, verifies it against the release's
+`checksums.txt`, and replaces `mfp` and `mfp-daemon` as a pair. It refuses when Homebrew or cargo
+installed this copy, naming the command that belongs to that install instead. The running daemon is
+left alone - it outlives every client on purpose - so `mfp shutdown` is what restarts it on the new
+version.
+
+Once a day, in the background, `mfp` asks GitHub what the latest release is and records the answer
+under `~/.cache/mfp`. A later run mentions it: on stderr after a subcommand, and in the header of the
+interface. `MFP_NO_UPDATE_CHECK=1` turns the check and the notice off.
+
 ### Keys
 
 | Key                 | Action                          |
@@ -104,7 +122,7 @@ max_concurrent_downloads = 2
 | What                               | Where                                                                   | Override          |
 | ---------------------------------- | ----------------------------------------------------------------------- | ----------------- |
 | `config.toml`                      | `~/.config/mfp`                                                         | `$MFP_CONFIG_DIR` |
-| Catalog cache and downloaded audio | `~/.cache/mfp`                                                          | `$MFP_CACHE_DIR`  |
+| Catalog cache, audio, update check | `~/.cache/mfp`                                                          | `$MFP_CACHE_DIR`  |
 | `state.json` and `daemon.log`      | `~/.local/state/mfp`                                                    | `$MFP_STATE_DIR`  |
 | Daemon socket                      | `$XDG_RUNTIME_DIR/mfp/daemon.sock`, else `$TMPDIR/mfp-$UID/daemon.sock` | `$MFP_SOCKET`     |
 

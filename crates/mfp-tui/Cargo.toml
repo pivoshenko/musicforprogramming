@@ -22,9 +22,16 @@ mfp-core.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+flate2.workspace = true
 libc.workspace = true
 ratatui.workspace = true
+# Blocking on purpose: `self update` and the version check run on ordinary threads, and a
+# second async runtime inside a synchronous client would exist to serve two HTTP requests
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

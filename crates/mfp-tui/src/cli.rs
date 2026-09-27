@@ -70,6 +70,21 @@ enum Commands {
     },
     /// Stop playback and shut down the daemon
     Shutdown,
+    /// Act on this installation rather than on playback
+    #[command(name = "self", subcommand)]
+    ManageSelf(SelfAction),
+}
+
+#[derive(Debug, Subcommand)]
+enum SelfAction {
+    /// Replace the installed binaries with the latest release
+    Update {
+        /// Report whether an update exists without installing it
+        #[arg(long)]
+        check: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Parses argv and either runs a headless subcommand or launches the interface.
@@ -88,7 +103,7 @@ where
     match Cli::try_parse_from(args) {
         Ok(cli) => match cli.command {
             None => launch_interface(),
-            Some(command) => dispatch(command),
+            Some(command) => dispatch_with_notice(command),
         },
         Err(error) => {
             use clap::error::ErrorKind;
@@ -117,6 +132,36 @@ fn launch_interface() -> u8 {
         },
         Err(error) => report_client_error(&error),
     }
+}
+
+/// Runs a headless subcommand, with the version check wrapped around it.
+///
+/// The check starts before the command and the notice prints after it, so the notice lands
+/// under the command's own line rather than ahead of it.
+fn dispatch_with_notice(command: Commands) -> u8 {
+    if does_its_own_checking(&command) {
+        return dispatch(command);
+    }
+    let suppress = emits_json(&command);
+    let check = crate::update::notice::spawn();
+    let code = dispatch(command);
+    crate::update::notice::settle(check);
+    crate::update::notice::print(suppress);
+    code
+}
+
+/// `self update` reaches the release itself, so a notice announcing the same update would be
+/// talking over it.
+fn does_its_own_checking(command: &Commands) -> bool {
+    matches!(command, Commands::ManageSelf(_))
+}
+
+/// Whether a subcommand's stdout is a document rather than a sentence.
+fn emits_json(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::List { json: true } | Commands::Status { json: true }
+    )
 }
 
 fn dispatch(command: Commands) -> u8 {
@@ -149,6 +194,7 @@ fn dispatch(command: Commands) -> u8 {
         Commands::List { json } => run_list(json),
         Commands::Status { json } => run_status(json),
         Commands::Shutdown => run_simple(Command::Shutdown, "Shutting down."),
+        Commands::ManageSelf(SelfAction::Update { check, json }) => crate::update::run(check, json),
     }
 }
 
@@ -472,6 +518,9 @@ mod tests {
             &["mfp", "status"],
             &["mfp", "status", "--json"],
             &["mfp", "shutdown"],
+            &["mfp", "self", "update"],
+            &["mfp", "self", "update", "--check"],
+            &["mfp", "self", "update", "--json"],
         ];
         for args in cases {
             Cli::try_parse_from(*args).unwrap_or_else(|e| panic!("{args:?} failed: {e}"));
@@ -505,6 +554,50 @@ mod tests {
     fn an_unknown_subcommand_is_a_usage_error() {
         let error = Cli::try_parse_from(["mfp", "teleport"]).unwrap_err();
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn self_on_its_own_is_a_usage_error_rather_than_an_update() {
+        assert_eq!(run_code(["mfp", "self"]), EXIT_USAGE);
+    }
+
+    #[test]
+    fn self_update_parses_its_flags_independently() {
+        let Commands::ManageSelf(SelfAction::Update { check, json }) =
+            Cli::try_parse_from(["mfp", "self", "update", "--check"])
+                .unwrap()
+                .command
+                .unwrap()
+        else {
+            panic!("self update did not parse as the update action");
+        };
+        assert!(check);
+        assert!(!json);
+    }
+
+    // == Update Notice ==
+
+    /// The notice is a courtesy on stderr; a document on stdout is not the place for one,
+    /// even on a different stream.
+    #[test]
+    fn the_notice_is_suppressed_for_the_commands_that_emit_json() {
+        assert!(emits_json(&Commands::List { json: true }));
+        assert!(emits_json(&Commands::Status { json: true }));
+        assert!(!emits_json(&Commands::List { json: false }));
+        assert!(!emits_json(&Commands::Status { json: false }));
+        assert!(!emits_json(&Commands::Pause));
+    }
+
+    #[test]
+    fn only_self_update_is_left_to_do_its_own_checking() {
+        assert!(does_its_own_checking(&Commands::ManageSelf(
+            SelfAction::Update {
+                check: false,
+                json: false
+            }
+        )));
+        assert!(!does_its_own_checking(&Commands::Pause));
+        assert!(!does_its_own_checking(&Commands::Status { json: false }));
     }
 
     // == Exit Codes ==

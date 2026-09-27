@@ -81,6 +81,13 @@ pub fn catalog_cache_file() -> Result<PathBuf> {
     Ok(cache_dir()?.join("catalog.json"))
 }
 
+/// What the last version check found, and when. Beside the catalog cache rather than in the
+/// state directory: it is a remembered answer that can be deleted at any time, not state
+/// the player would miss.
+pub fn update_check_file() -> Result<PathBuf> {
+    Ok(cache_dir()?.join("update-check.json"))
+}
+
 /// The directory holding `state.json` and `daemon.log`: `$MFP_STATE_DIR` if set, otherwise
 /// `~/.local/state/mfp` on every platform.
 pub fn state_dir() -> Result<PathBuf> {

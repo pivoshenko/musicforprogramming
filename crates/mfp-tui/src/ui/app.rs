@@ -107,6 +107,9 @@ pub struct App {
     /// Frames since launch, at [`super::anim::TICK_MS`]. Drives every moving thing.
     pub tick: u64,
     pub status: Option<Status>,
+    /// The version a newer release carries, when the last version check found one. Not a
+    /// [`Status`]: it is not a failure, and it never expires - an update stays available.
+    pub update: Option<String>,
     /// Set when the daemon stops answering, so the interface can say so rather than
     /// silently drawing a frozen snapshot.
     pub disconnected: bool,
@@ -133,6 +136,7 @@ impl App {
             cached: BTreeSet::new(),
             tick: 0,
             status: None,
+            update: None,
             disconnected: false,
             quit: false,
             restore: None,

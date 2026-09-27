@@ -68,6 +68,13 @@ window, 2048-point transform, exponential smoothing against the previous frame, 
 `SPECTRUM_MIN_DB` to `SPECTRUM_MAX_DB` onto `0..=255` - so a client can run the site's own analyser
 arithmetic unchanged.
 
+**Updates.** `mfp-tui/src/update/` is the only part of the client that reaches the network, and it
+reaches GitHub rather than the site. `mod.rs` resolves the latest release and decides whether this
+copy is ours to replace, `install.rs` verifies an archive and swaps `mfp` and `mfp-daemon` as a pair,
+and `notice.rs` is the once-a-day background check whose answer lands in `~/.cache/mfp` for a later
+run to mention. Nothing here is on any playback path, and `reqwest`'s blocking client is used on
+purpose: the client is synchronous and two HTTP requests do not justify a runtime.
+
 **Exit codes.** `0` ok, `1` the daemon rejected the command, `2` usage error, `3` the daemon was
 unreachable. They are part of the CLI's contract with whatever scripts it.
 
@@ -94,10 +101,18 @@ unreachable. They are part of the CLI's contract with whatever scripts it.
   and renames only once the length matches what the feed declares
 - Never add a second single-instance lock. The socket path *is* the lock; with no PID file beside it,
   the lock and the endpoint cannot disagree
-- Never fetch on a timer or in the background. Every catalog request is reached from `cache::load`,
-  called only when a user action needs data the cache cannot satisfy
+- Never fetch the catalog on a timer or in the background. Every catalog request is reached from
+  `cache::load`, called only when a user action needs data the cache cannot satisfy. The once-a-day
+  version check is the one background request, and it touches nothing the player reads
 - Never bump the version by hand. Releases are `workflow_dispatch`-only, and git-cliff resolves the
   version, bumps `Cargo.toml`, tags, and publishes
+- Never let the version check make a command slower or make one fail. It runs on a detached thread,
+  every error is dropped, and what is ever displayed is what a *previous* check recorded
+- Never write over a binary a package manager placed. `self update` refuses under Homebrew and cargo
+  and names their upgrade command instead, because a swapped binary is an install that reports itself
+  as healthy while no longer matching the hash its manager recorded
+- Never unpack a release archive to a path the archive chose. An entry is matched by file name, read
+  into memory, and written only beside the destination the client resolved itself
 
 ## Cross-Cutting Changes
 
@@ -109,6 +124,10 @@ from the interface.
 **Adding a field to the snapshot** means `StateSnapshot` in `protocol.rs`, whatever publishes it in
 `mfp-daemon/src/state.rs`, and the pane in `mfp-tui/src/ui/panes.rs` that renders it. Adding is safe;
 renaming is not.
+
+**Adding a subcommand that never reaches the daemon** - `self update` is the only one - touches
+`mfp-tui/src/cli.rs` and nothing in `protocol.rs`. The two predicates in `cli.rs` decide whether it
+gets an update notice wrapped around it and whether its stdout is a document.
 
 **Adding a path** goes in `mfp-core/src/paths.rs` with its `$MFP_*` override, then into the Paths
 table in the README. A path with no override cannot be isolated, which breaks the suite's ability to

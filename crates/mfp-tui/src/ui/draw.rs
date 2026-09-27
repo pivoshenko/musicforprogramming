@@ -118,6 +118,16 @@ fn header(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
         ));
     }
 
+    // After the two markers worth interrupting for, and unbolded: an update is worth
+    // mentioning for as long as it is available, not worth pulling the eye off a playing
+    // episode every frame
+    if let Some(latest) = &app.update {
+        left.push(Span::styled(
+            format!("  update {latest} available"),
+            Style::default().fg(theme.warn),
+        ));
+    }
+
     // Appended after the markers so they keep their room on a narrow terminal and the
     // masthead is what gives way
     let used: usize = left.iter().map(|span| span.content.chars().count()).sum();

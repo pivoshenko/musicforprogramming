@@ -54,6 +54,7 @@ pub fn run(mut client: Client) -> Result<()> {
         });
 
     let mut app = App::new(catalog, snapshot);
+    app.update = crate::update::notice::available();
     if app.catalog.episodes.is_empty() {
         app.complain("the daemon has no catalog yet");
     }
@@ -121,6 +122,10 @@ fn event_loop(
     let mut last_retry = Instant::now();
     let mut autostarted = false;
     let tick = Duration::from_millis(anim::TICK_MS);
+    // Started here rather than waited for: a session lasts long enough that the answer can
+    // arrive into a frame, which is why the interface never spends the grace period a
+    // one-line subcommand does
+    let mut check = crate::update::notice::spawn();
 
     while !app.quit {
         honour_caught_signal();
@@ -159,6 +164,10 @@ fn event_loop(
         }
 
         if app.expire_status() {
+            dirty = true;
+        }
+        if crate::update::notice::landed(&mut check) {
+            app.update = crate::update::notice::available();
             dirty = true;
         }
         if app.quit {
