@@ -107,7 +107,8 @@ interface. `MFP_NO_UPDATE_CHECK=1` turns the check and the notice off.
 | `d` / `x`           | Download / delete the selection |
 | `/`                 | Search                          |
 | `?`                 | Help                            |
-| `q`                 | Quit                            |
+| `q`                 | Quit the player, stopping it    |
+| `ctrl+c`            | Leave it, keep playing          |
 
 ## Configuration
 

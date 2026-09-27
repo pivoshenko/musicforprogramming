@@ -37,10 +37,12 @@ const SEEK_SHORT: f64 = 30.0;
 /// Seconds a long seek moves.
 const SEEK_LONG: f64 = 300.0;
 
-/// Draws the interface until the user quits.
+/// Draws the interface until the user leaves it.
 ///
-/// Quitting stops playback and ends the daemon with it: the interface is the player, so
-/// leaving a process behind still holding the audio device is not what quitting means.
+/// `q` quits the player: it stops playback and ends the daemon with it, because leaving a
+/// process behind still holding the audio device is not what quitting means. `ctrl+c` only
+/// detaches, leaving playback running - it is the key a terminal or a multiplexer sends to
+/// close a window, and a closed window must not be able to stop the music.
 pub fn run(mut client: Client) -> Result<()> {
     client.subscribe().map_err(anyhow::Error::from)?;
     let snapshot = client.status().unwrap_or_else(|_| StateSnapshot::stopped());
@@ -355,9 +357,19 @@ fn quit(client: &mut Client, app: &mut App) {
     app.quit = true;
 }
 
+/// Leaves the interface and leaves playback alone.
+///
+/// What `ctrl+c` does, because that is the key a terminal or a multiplexer sends when it wants
+/// a program to go away - closing a pane delivers it - and taking the music down with the pane
+/// is the opposite of the daemon outliving every client. Shutting the player down is `q`, which
+/// is a thing a person does deliberately rather than a side effect of a window closing.
+fn detach(app: &mut App) {
+    app.quit = true;
+}
+
 fn handle_key(client: &mut Client, app: &mut App, key: KeyEvent) {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-        quit(client, app);
+        detach(app);
         return;
     }
 
@@ -639,6 +651,114 @@ mod tests {
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
+    }
+
+    /// A daemon that answers every request with `ok` and reports what it was asked for, so a
+    /// test can tell a detach from a shutdown by what actually crossed the socket.
+    fn recording_daemon(path: std::path::PathBuf) -> std::sync::mpsc::Receiver<Command> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        let listener = UnixListener::bind(&path).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                if let Ok(request) = serde_json::from_str::<mfp_core::protocol::Request>(&line) {
+                    let response = mfp_core::protocol::Response::ok(request.id);
+                    let mut out = &stream;
+                    let _ = writeln!(out, "{}", serde_json::to_string(&response).unwrap());
+                    let _ = tx.send(request.cmd);
+                }
+                line.clear();
+            }
+        });
+        rx
+    }
+
+    fn connected(dir: &tempfile::TempDir) -> (Client, App, std::sync::mpsc::Receiver<Command>) {
+        let path = dir.path().join("d.sock");
+        let rx = recording_daemon(path.clone());
+        let client = Client::connect_at(&path).unwrap();
+        let catalog = mfp_core::model::Catalog {
+            episodes: Vec::new(),
+            info: Vec::new(),
+            fetched_at: 0,
+            enriched: false,
+        };
+        (client, App::new(catalog, StateSnapshot::stopped()), rx)
+    }
+
+    /// Everything the daemon was asked for within `window`.
+    fn commands(rx: &std::sync::mpsc::Receiver<Command>, window: Duration) -> Vec<Command> {
+        let deadline = Instant::now() + window;
+        let mut seen = Vec::new();
+        while let Some(left) = deadline.checked_duration_since(Instant::now())
+            && let Ok(command) = rx.recv_timeout(left)
+        {
+            seen.push(command);
+        }
+        seen
+    }
+
+    /// Closing a pane delivers `ctrl+c`, so a window closing must not be able to stop the music.
+    #[test]
+    fn ctrl_c_detaches_and_leaves_playback_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut client, mut app, rx) = connected(&dir);
+
+        handle_key(
+            &mut client,
+            &mut app,
+            press(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(app.quit, "ctrl+c did not leave the interface");
+        let sent = commands(&rx, Duration::from_millis(300));
+        assert!(
+            !sent.contains(&Command::Shutdown),
+            "ctrl+c shut the daemon down rather than detaching: {sent:?}"
+        );
+    }
+
+    /// `q` is the deliberate one: quitting the player means the player stops.
+    #[test]
+    fn q_quits_the_player_and_ends_the_daemon_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut client, mut app, rx) = connected(&dir);
+
+        handle_key(
+            &mut client,
+            &mut app,
+            press(KeyCode::Char('q'), KeyModifiers::NONE),
+        );
+
+        assert!(app.quit, "q did not leave the interface");
+        let sent = commands(&rx, Duration::from_secs(2));
+        assert!(
+            sent.contains(&Command::Shutdown),
+            "q left the daemon running: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn detaching_asks_the_daemon_for_nothing_at_all() {
+        let catalog = mfp_core::model::Catalog {
+            episodes: Vec::new(),
+            info: Vec::new(),
+            fetched_at: 0,
+            enriched: false,
+        };
+        let mut app = App::new(catalog, StateSnapshot::stopped());
+        assert!(!app.quit);
+
+        detach(&mut app);
+
+        assert!(app.quit);
     }
 
     #[test]

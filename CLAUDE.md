@@ -41,9 +41,11 @@ change belongs in both.
 ## Architecture
 
 **The split.** The daemon is the sole authority over playback and download state and outlives every
-client - closing a pane must not interrupt audio. It exits only on an explicit `shutdown` or the
-configured `idle_timeout_secs` (unset by default, meaning never). `mfp` autostarts `mfp-daemon` when
-nothing is listening on the socket, looking beside itself and then on `PATH`; `$MFP_DAEMON` overrides.
+client - closing a pane must not interrupt audio, which is why `ctrl+c` in the interface only
+detaches and `q` is the one key that shuts the daemon down. It exits only on an explicit
+`shutdown` or the configured `idle_timeout_secs` (unset by default, meaning never). `mfp`
+autostarts `mfp-daemon` when nothing is listening on the socket, looking beside itself and then on
+`PATH`; `$MFP_DAEMON` overrides.
 
 **Concurrency.** `rodio` blocks and wants an OS thread of its own, while the socket server and the
 downloads want `tokio`. `audio/` runs on one dedicated thread consuming a command channel and never
