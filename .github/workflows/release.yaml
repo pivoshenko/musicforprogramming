@@ -1,0 +1,288 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (leave empty to auto-detect from commits)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      tag: v${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --version
+
+      - name: Add git-cliff to PATH
+        run: echo "$RUNNER_TEMP/git-cliff/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(git-cliff --bumped-version)
+            VERSION="${VERSION#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "resolved version: ${VERSION}"
+
+      - name: Update version
+        run: sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" Cargo.toml
+
+      - name: Update lockfile
+        run: |
+          rustup default stable
+          cargo update --workspace
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --tag v${{ steps.version.outputs.version }} --output CHANGELOG.md
+
+      - name: Commit and tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "release: v${VERSION}"
+          fi
+          git tag "v${VERSION}"
+          git push origin main --tags
+
+  build:
+    needs: tag
+    # Unix only: the client speaks over a Unix domain socket and the state
+    # directory is chmodded through PermissionsExt, so there is no Windows
+    # target to ship
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: musicforprogramming-x86_64-unknown-linux-gnu.tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: musicforprogramming-aarch64-unknown-linux-gnu.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: musicforprogramming-x86_64-apple-darwin.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: musicforprogramming-aarch64-apple-darwin.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # rodio links against ALSA on Linux, and the aarch64 build needs the
+      # cross linker plus the target's own copy of the library
+      - name: Install audio dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libasound2-dev
+
+      - name: Install cross-compiler
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu libasound2-dev:arm64
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/mfp staging/
+          cp target/${{ matrix.target }}/release/mfp-daemon staging/
+          cd staging
+          tar czf ../${{ matrix.archive }} mfp mfp-daemon
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  release:
+    needs: [tag, build]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          args: --latest --strip header
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          body: ${{ steps.changelog.outputs.content }}
+          files: |
+            dist/*
+
+  publish-crates:
+    needs: [tag, release]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libasound2-dev
+
+      - name: Authenticate with Crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      # Dependency order, not alphabetical: mfp-daemon and mfp-tui both depend on
+      # mfp-core, so it has to be on the index before they are verified. cargo
+      # publish blocks on that itself
+      - name: Publish to Crates.io
+        run: |
+          cargo publish -p mfp-core
+          cargo publish -p mfp-daemon
+          cargo publish -p mfp-tui
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  update-homebrew:
+    needs: [tag, release]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Update Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ needs.tag.outputs.tag }}"
+          VERSION="${VERSION#v}"
+          SHA256=$(sha256sum dist/musicforprogramming-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA256_INTEL=$(sha256sum dist/musicforprogramming-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA256_LINUX=$(sha256sum dist/musicforprogramming-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          SHA256_LINUX_ARM=$(sha256sum dist/musicforprogramming-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+
+          REPO="https://github.com/pivoshenko/musicforprogramming/releases/download/v${VERSION}"
+
+          cat > formula.rb << FORMULA
+          class Musicforprogramming < Formula
+            desc "A terminal player for musicforprogramming.net, written in Rust."
+            homepage "https://github.com/pivoshenko/musicforprogramming"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${REPO}/musicforprogramming-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA256}"
+              else
+                url "${REPO}/musicforprogramming-x86_64-apple-darwin.tar.gz"
+                sha256 "${SHA256_INTEL}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${REPO}/musicforprogramming-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA256_LINUX_ARM}"
+              else
+                url "${REPO}/musicforprogramming-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${SHA256_LINUX}"
+              end
+            end
+
+            def install
+              bin.install "mfp"
+              bin.install "mfp-daemon"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/mfp --version")
+            end
+          end
+          FORMULA
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/pivoshenko/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp formula.rb tap/Formula/musicforprogramming.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/musicforprogramming.rb
+          git commit -m "musicforprogramming ${VERSION}"
+          git push
