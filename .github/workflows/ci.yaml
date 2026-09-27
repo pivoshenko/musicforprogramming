@@ -65,7 +65,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Not EmbarkStudios/cargo-deny-action: it runs in an amd64 container, which
+      # cannot execute on an arm runner and ignores rust-toolchain.toml besides
       - name: Install cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Run audit
+        run: just audit
