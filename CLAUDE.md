@@ -10,10 +10,12 @@ macOS and Linux only. The client reaches the daemon over a Unix domain socket an
 is chmodded through `PermissionsExt`, so there is no Windows target and CI has no Windows leg.
 `AGENTS.md` is a symlink to this file.
 
-`plugins/herdr/mfp.player` is a Herdr plugin, not Rust: a `herdr-plugin.toml` manifest whose transport
-actions are the `mfp` CLI verbatim, plus one Node script for the action that needs to render its
-result. It is outside the workspace, so `just check` does not see it - changing a CLI verb or an exit
-code is what would break it.
+`plugins/herdr/mfp.player` is a Herdr plugin, not Rust: a `herdr-plugin.toml` manifest over a few
+scripts in `plugin/`. Each action runs an `mfp` subcommand and then reports the state it left behind,
+because a plugin command's stdout goes to Herdr's command log rather than the screen. The pane starts
+the daemon through a throwaway client before launching the interface, so the daemon is never a child
+of a pane somebody dismisses. It is outside the workspace, so `just check` does not see it - changing
+a CLI verb or an exit code is what would break it.
 
 ## Commands
 
