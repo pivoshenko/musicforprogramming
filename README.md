@@ -16,25 +16,27 @@
   <a href="https://stand-with-ukraine.pp.ua"><img alt="Stand with Ukraine" src="https://img.shields.io/badge/Stand_With-Ukraine-FFD700?style=flat-square&labelColor=0057B7"></a>
 </p>
 
-A terminal player for [musicforprogramming.net](https://musicforprogramming.net), written in Rust.
-
 ## Overview
 
-### Install
+I listen to [musicforprogramming.net](https://musicforprogramming.net) while I work, and the mix always lived in a browser tab - one to lose among thirty others, or close along with the window. So this is the player I wanted instead: a daemon that owns the audio and outlives every client, a key for everything and a subcommand behind every key, a cached catalog, and a [Herdr](https://herdr.dev) plugin, because that is where I spend the day.
 
-#### Standalone Installer
+All credit for the music and the curation goes to the people behind the site. This is an unofficial, independent client, not affiliated with or endorsed by musicforprogramming.net.
+
+## Install
+
+### Standalone Installer
 
 ```sh
 curl -fsSL https://pivoshenko.dev/mfp.sh | sh
 ```
 
-#### Homebrew
+### Homebrew
 
 ```sh
 brew install pivoshenko/tap/musicforprogramming
 ```
 
-#### From Source
+### From Source
 
 Requires a Rust toolchain matching `rust-toolchain.toml` (stable, 1.96+), and `libasound2-dev` on Linux.
 
@@ -45,10 +47,10 @@ cargo install --path crates/mfp-tui
 
 Both binaries must be on `PATH`: `mfp` autostarts `mfp-daemon` when nothing is listening on the socket, looking for it beside itself and then on `PATH`. `$MFP_DAEMON` overrides that.
 
-<h3 align="left">
+<h2 align="left">
   <img src="https://github.com/herdrdev/herdr/raw/master/assets/logo.png" alt="" height="28" align="left" />
   Herdr
-</h3>
+</h2>
 
 [`plugins/herdr/mfp.player`](plugins/herdr/mfp.player) is a [Herdr](https://herdr.dev) plugin that opens the interface as a pane and puts the transport on actions.
 
@@ -134,9 +136,3 @@ max_concurrent_downloads = 2
 | Catalog cache, audio, update check | `~/.cache/mfp`                                                          | `$MFP_CACHE_DIR`  |
 | `state.json` and `daemon.log`      | `~/.local/state/mfp`                                                    | `$MFP_STATE_DIR`  |
 | Daemon socket                      | `$XDG_RUNTIME_DIR/mfp/daemon.sock`, else `$TMPDIR/mfp-$UID/daemon.sock` | `$MFP_SOCKET`     |
-
-## Acknowledgements
-
-[musicforprogramming.net](https://musicforprogramming.net) is a wonderful project, and this player exists only because of it - all credit for the music and the curation goes to the people behind the site.
-
-This is an unofficial, independent client: it is not affiliated with, endorsed by, or connected to musicforprogramming.net in any way.
