@@ -22,6 +22,10 @@ I listen to [musicforprogramming.net](https://musicforprogramming.net) while I w
 
 All credit for the music and the curation goes to the people behind the site. This is an unofficial, independent client, not affiliated with or endorsed by musicforprogramming.net.
 
+<p align="center">
+  <img alt="The mfp interface: the episode list, the player with its spectrum analyser, and the track listing for what is playing" src="https://raw.githubusercontent.com/pivoshenko/musicforprogramming/main/assets/preview_interface.png" width="800" />
+</p>
+
 ## Install
 
 ### Standalone Installer
