@@ -1,16 +1,10 @@
-//! Where the player keeps its configuration, caches, durable state, logs, and socket. The
-//! daemon and every client resolve these identically, so they always agree on the endpoint
-//! and on which files they share.
-//!
-//! Every location has an explicit override: `$MFP_SOCKET`, `$MFP_CONFIG_DIR`,
-//! `$MFP_CACHE_DIR`, and `$MFP_STATE_DIR`. Isolating an instance takes all of them -
-//! scoping the socket alone leaves two daemons writing one `state.json` and one cache.
+//! Where the player keeps its configuration, caches, durable state, logs, and socket.
+//! Isolating an instance takes all four `$MFP_*` overrides, never the socket alone.
 
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-/// Every directory the player owns, named after the binary as the `$MFP_*` overrides are.
 const APP_DIR: &str = "mfp";
 const SOCKET_NAME: &str = "daemon.sock";
 
@@ -29,24 +23,17 @@ fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
-/// The environment override in force for one of the config, cache, or state directories.
 fn overridden_dir(explicit_key: &str) -> Option<PathBuf> {
     resolve_overridden_dir(env_var(explicit_key).as_deref())
 }
 
-/// An explicit `$MFP_*_DIR` is used as given: it names one instance's own directory, not
-/// a root shared with other applications. `None` leaves the platform default in force.
-///
-/// Deliberately no `$XDG_*_HOME` fallback: honouring one without the others scatters an
-/// instance across several roots - config read from one place, state written to another.
 fn resolve_overridden_dir(explicit: Option<&str>) -> Option<PathBuf> {
     explicit
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
 
-/// The directory holding `config.toml`: `$MFP_CONFIG_DIR` if set, otherwise
-/// `~/.config/mfp` on every platform.
+/// `$MFP_CONFIG_DIR` if set, otherwise `~/.config/mfp` on every platform.
 pub fn config_dir() -> Result<PathBuf> {
     if let Some(dir) = overridden_dir("MFP_CONFIG_DIR") {
         return Ok(dir);
@@ -54,16 +41,12 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".config").join(APP_DIR))
 }
 
-/// The optional configuration file. Its absence is not an error; see [`crate::config`].
 pub fn config_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("config.toml"))
 }
 
-/// The directory holding the catalog cache and downloaded audio: `$MFP_CACHE_DIR` if set,
-/// otherwise `~/.cache/mfp` on every platform.
-///
-/// Deliberately not `~/Library/Caches` on macOS: the downloads here are a library a user
-/// browses and copies from, not a cache the system may reclaim behind their back.
+/// `$MFP_CACHE_DIR` if set, otherwise `~/.cache/mfp` - deliberately not macOS's
+/// `~/Library/Caches`, which the system may reclaim behind a listener's back.
 pub fn cache_dir() -> Result<PathBuf> {
     if let Some(dir) = overridden_dir("MFP_CACHE_DIR") {
         return Ok(dir);
@@ -71,25 +54,19 @@ pub fn cache_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".cache").join(APP_DIR))
 }
 
-/// The directory holding `<identifier>.mp3` and `<identifier>.mp3.part` files.
 pub fn audio_cache_dir() -> Result<PathBuf> {
     Ok(cache_dir()?.join("audio").join("episodes"))
 }
 
-/// The normalised JSON document holding the cached catalog.
 pub fn catalog_cache_file() -> Result<PathBuf> {
     Ok(cache_dir()?.join("catalog.json"))
 }
 
-/// What the last version check found, and when. Beside the catalog cache rather than in the
-/// state directory: it is a remembered answer that can be deleted at any time, not state
-/// the player would miss.
 pub fn update_check_file() -> Result<PathBuf> {
     Ok(cache_dir()?.join("update-check.json"))
 }
 
-/// The directory holding `state.json` and `daemon.log`: `$MFP_STATE_DIR` if set, otherwise
-/// `~/.local/state/mfp` on every platform.
+/// `$MFP_STATE_DIR` if set, otherwise `~/.local/state/mfp` on every platform.
 pub fn state_dir() -> Result<PathBuf> {
     if let Some(dir) = overridden_dir("MFP_STATE_DIR") {
         return Ok(dir);
@@ -97,20 +74,16 @@ pub fn state_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".local").join("state").join(APP_DIR))
 }
 
-/// The durable listening state file.
 pub fn state_file() -> Result<PathBuf> {
     Ok(state_dir()?.join("state.json"))
 }
 
-/// The file an autostarted daemon's output is redirected to, and the path a client names
-/// when it reports the daemon as unreachable.
 pub fn log_file() -> Result<PathBuf> {
     Ok(state_dir()?.join("daemon.log"))
 }
 
-/// The Unix domain socket the daemon listens on: `$MFP_SOCKET` if set, otherwise
-/// `$XDG_RUNTIME_DIR/mfp/daemon.sock` where that variable is set, and
-/// `$TMPDIR/mfp-$UID/daemon.sock` otherwise, with `$TMPDIR` falling back to `/tmp`.
+/// `$MFP_SOCKET` if set, otherwise `$XDG_RUNTIME_DIR/mfp/daemon.sock`, otherwise
+/// `$TMPDIR/mfp-$UID/daemon.sock` with `$TMPDIR` falling back to `/tmp`.
 pub fn socket_path() -> PathBuf {
     resolve_socket_path(
         env_var("MFP_SOCKET").as_deref(),
@@ -139,8 +112,7 @@ fn resolve_socket_path(
 }
 
 /// Creates the socket's parent directory mode `0700`, tightening it if it already exists
-/// with broader permissions. Fails rather than binding when it belongs to another user, is
-/// a symbolic link, or is something other than a directory.
+/// broader. Fails rather than binding when it is a symlink, a file, or another user's.
 pub fn ensure_socket_dir(socket_path: &Path) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 
@@ -151,9 +123,6 @@ pub fn ensure_socket_dir(socket_path: &Path) -> Result<()> {
         ))
     })?;
 
-    // another user can pre-create the default directory in world-writable `/tmp` as a link
-    // to one of ours, which `metadata` would follow: chmod and bind inside a directory of
-    // their choosing
     match std::fs::symlink_metadata(dir) {
         Ok(metadata) => {
             if metadata.is_symlink() {

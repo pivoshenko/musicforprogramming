@@ -1,8 +1,3 @@
-//! Argument parsing and the headless transport commands.
-//!
-//! A subcommand acts, prints one human-readable line to stdout, and exits: no alternate
-//! screen, no raw mode, nothing drawn. Diagnostics go to stderr so stdout stays pipeable.
-
 use std::ffi::OsString;
 use std::process::ExitCode;
 
@@ -13,13 +8,10 @@ use crate::client::{Client, ClientError};
 
 pub const EXIT_OK: u8 = 0;
 
-/// The daemon was reached but rejected the command or could not perform it.
 pub const EXIT_REJECTED: u8 = 1;
 
-/// Usage error: unknown subcommand, missing argument, or unparseable argument.
 pub const EXIT_USAGE: u8 = 2;
 
-/// The daemon was unreachable and could not be started.
 pub const EXIT_UNREACHABLE: u8 = 3;
 
 #[derive(Debug, Parser)]
@@ -87,10 +79,6 @@ enum SelfAction {
     },
 }
 
-/// Parses argv and either runs a headless subcommand or launches the interface.
-///
-/// Everything below returns a plain `u8` so tests can assert the exit code for every
-/// outcome directly; this is the one place that converts to [`ExitCode`].
 pub fn run() -> ExitCode {
     ExitCode::from(run_code(std::env::args_os()))
 }
@@ -134,10 +122,6 @@ fn launch_interface() -> u8 {
     }
 }
 
-/// Runs a headless subcommand, with the version check wrapped around it.
-///
-/// The check starts before the command and the notice prints after it, so the notice lands
-/// under the command's own line rather than ahead of it.
 fn dispatch_with_notice(command: Commands) -> u8 {
     if does_its_own_checking(&command) {
         return dispatch(command);
@@ -150,13 +134,10 @@ fn dispatch_with_notice(command: Commands) -> u8 {
     code
 }
 
-/// `self update` reaches the release itself, so a notice announcing the same update would be
-/// talking over it.
 fn does_its_own_checking(command: &Commands) -> bool {
     matches!(command, Commands::ManageSelf(_))
 }
 
-/// Whether a subcommand's stdout is a document rather than a sentence.
 fn emits_json(command: &Commands) -> bool {
     matches!(
         command,
@@ -203,7 +184,6 @@ fn usage_error(message: &str) -> u8 {
     EXIT_USAGE
 }
 
-/// Reports a [`ClientError`] to stderr and returns the exit code it maps to.
 fn report_client_error(error: &ClientError) -> u8 {
     match error {
         ClientError::Unreachable(message) => {
@@ -221,7 +201,6 @@ fn connect() -> Result<Client, u8> {
     Client::connect().map_err(|error| report_client_error(&error))
 }
 
-/// Sends `command` and prints `message` on success, needing nothing back from the daemon.
 fn run_simple(command: Command, message: &str) -> u8 {
     let mut client = match connect() {
         Ok(client) => client,
@@ -236,8 +215,6 @@ fn run_simple(command: Command, message: &str) -> u8 {
     }
 }
 
-/// Sends `command`, then reports the playback state a follow-up `status` returns, or
-/// `fallback` when that follow-up fails.
 fn run_transport(command: Command, fallback: &str) -> u8 {
     let mut client = match connect() {
         Ok(client) => client,
@@ -278,9 +255,6 @@ fn run_status(json: bool) -> u8 {
     }
 }
 
-/// `list` asks the daemon rather than its cache file, so the listing is what the daemon
-/// serves from. A daemon with no catalog answers `catalog_unavailable`, a rejection rather
-/// than an unreachable daemon.
 fn run_list(json: bool) -> u8 {
     let mut client = match Client::connect() {
         Ok(client) => client,
@@ -305,8 +279,6 @@ fn run_list(json: bool) -> u8 {
     }
 }
 
-/// Reports a [`ClientError`] for `status`/`list`, where an unreachable daemon must still
-/// emit a valid JSON document on stdout under `--json`.
 fn report_status_error(error: &ClientError, json: bool) -> u8 {
     match error {
         ClientError::Unreachable(message) => {
@@ -324,34 +296,26 @@ fn report_status_error(error: &ClientError, json: bool) -> u8 {
     }
 }
 
-/// Reports a `--json` document that could not be built. Nothing goes to stdout, so no
-/// caller parses half a document as a whole one.
 fn report_serialisation_error(error: &serde_json::Error, what: &str) -> u8 {
     eprintln!("Cannot render {what} as JSON: {error}");
     EXIT_REJECTED
 }
 
-/// The JSON document `--json` emits for an unreachable daemon.
 fn unreachable_json(message: &str) -> String {
     serde_json::json!({ "unreachable": true, "error": message }).to_string()
 }
 
-/// Either a relative offset in seconds or an absolute position in seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SeekArg {
     Relative(f64),
     Absolute(f64),
 }
 
-/// Parses a `seek` argument: a signed relative offset such as `+30`/`-30`, or an absolute
-/// `H:MM:SS` timestamp.
 fn parse_seek(raw: &str) -> Result<SeekArg, String> {
     if raw.starts_with('+') || raw.starts_with('-') {
         return raw
             .parse::<f64>()
             .ok()
-            // `f64::from_str` accepts `+inf` and `+NaN`, which are not offsets and which
-            // the daemon would have to refuse across the socket
             .filter(|offset| offset.is_finite())
             .map(SeekArg::Relative)
             .ok_or_else(|| format!("'{raw}' is not a valid seek offset"));
@@ -361,8 +325,6 @@ fn parse_seek(raw: &str) -> Result<SeekArg, String> {
         .ok_or_else(|| format!("'{raw}' is not a valid seek offset or H:MM:SS timestamp"))
 }
 
-/// Parses an `H:MM:SS` timestamp into seconds. Minutes and seconds must each fall in
-/// `0..60`, and the whole must be a finite non-negative number of seconds.
 fn parse_timestamp(raw: &str) -> Option<f64> {
     let [hours, minutes, seconds]: [&str; 3] =
         raw.split(':').collect::<Vec<_>>().try_into().ok()?;
@@ -372,8 +334,7 @@ fn parse_timestamp(raw: &str) -> Option<f64> {
     if !(0.0..60.0).contains(&minutes) || !(0.0..60.0).contains(&seconds) {
         return None;
     }
-    // The minute and second range checks reject non-finite values, but the hour has no
-    // upper bound, so `inf:00:00` and `NaN:00:00` would otherwise parse
+
     let total = hours * 3600.0 + minutes * 60.0 + seconds;
     (total.is_finite() && total >= 0.0).then_some(total)
 }
@@ -397,8 +358,6 @@ fn seek_command(arg: SeekArg) -> (Command, String) {
     }
 }
 
-/// A one-line description of a snapshot's transport state, for commands whose outcome the
-/// daemon's `{"type":"ok"}` cannot name: it carries neither the resulting episode nor state.
 fn describe_state(state: &StateSnapshot) -> String {
     match &state.episode {
         None => "Nothing is loaded.".to_string(),
@@ -417,7 +376,6 @@ fn describe_state(state: &StateSnapshot) -> String {
     }
 }
 
-/// The human-readable `status` line.
 fn format_status_line(state: &StateSnapshot) -> String {
     let Some(episode) = &state.episode else {
         return "Stopped. Nothing loaded.".to_owned();
@@ -454,7 +412,6 @@ fn format_catalog_line(episode: &mfp_core::Episode) -> String {
     )
 }
 
-/// Formats seconds as `H:MM:SS`, clamped to non-negative.
 fn format_hms(secs: f64) -> String {
     let total_seconds = secs.max(0.0).round() as u64;
     let hours = total_seconds / 3600;
@@ -492,10 +449,6 @@ mod tests {
         }];
         snapshot
     }
-
-    // == Clap Surface ==
-
-    // Every subcommand parses to the shape the spec table names
 
     #[test]
     fn every_subcommand_parses() {
@@ -575,10 +528,6 @@ mod tests {
         assert!(!json);
     }
 
-    // == Update Notice ==
-
-    /// The notice is a courtesy on stderr; a document on stdout is not the place for one,
-    /// even on a different stream.
     #[test]
     fn the_notice_is_suppressed_for_the_commands_that_emit_json() {
         assert!(emits_json(&Commands::List { json: true }));
@@ -599,10 +548,6 @@ mod tests {
         assert!(!does_its_own_checking(&Commands::Pause));
         assert!(!does_its_own_checking(&Commands::Status { json: false }));
     }
-
-    // == Exit Codes ==
-
-    // Each asserted directly, none touching a daemon
 
     #[test]
     fn an_unknown_subcommand_exits_with_the_usage_code() {
@@ -647,8 +592,6 @@ mod tests {
         );
     }
 
-    // == Seek Parsing ==
-
     #[test]
     fn seek_accepts_a_positive_relative_offset() {
         assert_eq!(parse_seek("+30"), Ok(SeekArg::Relative(30.0)));
@@ -673,8 +616,6 @@ mod tests {
         assert!(parse_seek("1:30").is_err());
     }
 
-    /// `f64::from_str` accepts these, so the parser has to refuse them itself rather than
-    /// send a position the daemon cannot turn into a `Duration`.
     #[test]
     fn seek_rejects_a_target_that_is_not_a_finite_number_of_seconds() {
         for raw in [
@@ -713,8 +654,6 @@ mod tests {
         assert_eq!(message, "Seek to 1:30:00 requested.");
     }
 
-    // == JSON Shape ==
-
     #[test]
     fn status_json_is_a_single_valid_document() {
         let json = serde_json::to_string(&snapshot()).unwrap();
@@ -752,8 +691,6 @@ mod tests {
         assert_eq!(value["unreachable"], true);
         assert_eq!(value["error"], "the daemon could not be started");
     }
-
-    // == Human-Readable Formatting ==
 
     #[test]
     fn format_hms_formats_hours_minutes_seconds() {

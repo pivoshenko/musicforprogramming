@@ -1,10 +1,3 @@
-//! Renders whole frames against a test backend.
-//!
-//! The unit tests cover the arithmetic each pane does; these cover what it is for: that
-//! a frame comes out at all. Every terminal size from unusably small to huge is drawn,
-//! because a layout's failure mode is a panic in `Rect` arithmetic at a size nobody tried.
-
-// An integration test is its own crate, so the library's cfg(test) exemption does not reach it
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -124,7 +117,7 @@ fn a_full_size_frame_draws_every_pane() {
     assert!(frame.contains("// Episodes"), "no episodes pane");
     assert!(frame.contains("// Player"), "no player pane");
     assert!(frame.contains("// Tracks"), "no tracks pane");
-    // the analyser has no title of its own; it is the bottom of the player pane
+
     assert!(
         frame
             .lines()
@@ -160,7 +153,7 @@ fn a_frame_too_small_to_use_says_so_rather_than_drawing_a_mangled_one() {
 #[test]
 fn every_terminal_size_from_tiny_to_large_draws_without_panicking() {
     let mut app = app();
-    // 1638 and 1700 straddle the point where a `u16` percentage of the width overflows
+
     for width in [
         1u16, 2, 8, 20, 35, 36, 37, 59, 76, 77, 120, 400, 1638, 1639, 1700,
     ] {
@@ -195,7 +188,7 @@ fn searching_shows_the_query_and_the_match_count() {
     assert!(frame.contains("/julien"));
     assert!(frame.contains("1 match"));
     assert!(frame.contains("Julien Mier"));
-    // The loaded episode keeps its place in the player pane; what filters is the catalog
+
     assert!(
         !frame.contains("Mindaugas"),
         "the filter must actually filter"
@@ -288,12 +281,10 @@ fn the_tagline_sits_on_the_header_row_beside_the_site_name() {
     assert!(header.contains(
         "A series of mixes intended for listening while programming to focus the brain and inspire the mind."
     ));
-    // the whole tagline is on that one row, so the row below is the first pane's border
+
     assert!(!rows.next().unwrap().contains("A series"));
 }
 
-/// Narrowing the header must never cut the tagline mid-word: it is there whole or not at
-/// all.
 #[test]
 fn a_narrow_header_drops_the_tagline_whole() {
     for (width, present) in [(200u16, true), (130, true), (120, false), (40, false)] {
@@ -314,8 +305,6 @@ fn a_narrow_header_drops_the_tagline_whole() {
     }
 }
 
-/// The selection band must run the whole row. Stopping it before the duration reads as
-/// the name being selected rather than the episode.
 #[test]
 fn the_selected_row_is_highlighted_across_its_full_width() {
     let mut app = app();
@@ -336,7 +325,6 @@ fn the_selected_row_is_highlighted_across_its_full_width() {
         })
         .expect("no cursor row");
 
-    // The duration is right-aligned in the catalog pane's last eight cells
     let band: Vec<u16> = (1..39)
         .filter(|x| {
             buffer

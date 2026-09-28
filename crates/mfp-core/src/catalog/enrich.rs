@@ -1,50 +1,40 @@
-//! Best-effort enrichment from the site's client bundle, which is the only source of
-//! track listings.
-//!
-//! Nothing in this module may fail the catalog. Every failure - an unreachable site
-//! root, a bundle whose path cannot be discovered, a bundle whose shape has changed, a
-//! single malformed record - is logged once at debug level and skipped.
+//! Best-effort enrichment from the site's client bundle, the only source of track listings.
+//! Nothing here may fail the catalog: every failure is logged at debug level and skipped.
 
 use std::collections::HashMap;
 
 use crate::model::{Episode, InfoPage};
 
-/// One record extracted from the client bundle's object-literal array.
-///
-/// `file` is the join key: it is byte-identical to an episode's enclosure URL.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Record {
     pub slug: String,
-    /// `"episode"` for the 79 episodes, `"info"` for the `about` and `credits` pages.
+
+    /// `"episode"` for an episode, `"info"` for the `about` and `credits` pages.
     pub kind: String,
     pub order: Option<u32>,
-    /// Display title, which every record the site draws carries.
+
     pub title: Option<String>,
-    /// The site's own flag for the one episode it colours differently.
+
     pub special: bool,
+    /// The join key: byte-identical to an episode's enclosure URL.
     pub file: String,
-    /// Plain text, converted from the bundle's HTML fragment.
+
     pub tracklist: Option<String>,
-    /// Plain text, converted from the bundle's HTML fragment.
+
     pub body: Option<String>,
-    /// Plain text, converted from the bundle's HTML fragment.
+
     pub links: Option<String>,
 }
 
-/// What one enrichment pass produced beyond the episodes it wrote through.
-///
-/// The default is what every failure yields: nothing enriched and no information pages.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Enrichment {
-    /// Whether any episode was enriched. False means the catalog is the feed alone.
     pub applied: bool,
-    /// The site's information pages, empty when the bundle carried none.
+
     pub info: Vec<InfoPage>,
 }
 
-/// Enriches `episodes` in place, returning what else the bundle carried.
-///
-/// Never fails: an unreachable or unreadable bundle yields [`Enrichment::default`].
+/// Enriches `episodes` in place and returns what else the bundle carried. Never fails: an
+/// unreachable or unreadable bundle yields [`Enrichment::default`].
 pub async fn enrich(client: &reqwest::Client, episodes: &mut [Episode]) -> Enrichment {
     match fetch_bundle(client).await {
         Some(bundle) => enrich_from(&bundle, episodes),
@@ -52,8 +42,6 @@ pub async fn enrich(client: &reqwest::Client, episodes: &mut [Episode]) -> Enric
     }
 }
 
-/// A bundle whose shape has changed yields no records, which costs the track listings and
-/// the information pages and nothing else.
 pub(super) fn enrich_from(bundle_js: &str, episodes: &mut [Episode]) -> Enrichment {
     let records = extract_records(bundle_js);
     if records.is_empty() {
@@ -67,9 +55,6 @@ pub(super) fn enrich_from(bundle_js: &str, episodes: &mut [Episode]) -> Enrichme
     }
 }
 
-/// The information pages among the records, in the order the bundle lists them.
-///
-/// A record lacking a title or a body is skipped rather than yielding an empty page.
 fn info_pages(records: &[Record]) -> Vec<InfoPage> {
     records
         .iter()
@@ -84,15 +69,12 @@ fn info_pages(records: &[Record]) -> Vec<InfoPage> {
         .collect()
 }
 
-/// Retrieves the current client bundle, or `None` with the reason logged once.
 async fn fetch_bundle(client: &reqwest::Client) -> Option<String> {
     let shell = fetch_text(client, super::SITE_URL).await?;
 
     let path = match find_bundle_url(&shell) {
         Some(path) => path,
         None => {
-            // the site root is a one-line script that redirects to the newest episode,
-            // and that page is the shell carrying the bundle reference
             let Some(target) = find_redirect_target(&shell) else {
                 tracing::debug!("the site root references no client bundle");
                 return None;
@@ -111,8 +93,6 @@ async fn fetch_bundle(client: &reqwest::Client) -> Option<String> {
     let url = absolute(&path);
     let body = fetch_text(client, &url).await?;
 
-    // upstream answers 200 for any path, so the status says nothing: a shell document
-    // served in place of the bundle is a retrieval failure for this source
     if !is_script(&body) {
         tracing::debug!("{url} returned a document rather than a script");
         return None;
@@ -121,7 +101,6 @@ async fn fetch_bundle(client: &reqwest::Client) -> Option<String> {
     Some(body)
 }
 
-/// Whether a 200 response body is a script rather than the site's HTML shell.
 fn is_script(body: &str) -> bool {
     let body = body.trim_start();
     !body.is_empty() && !body.starts_with('<')
@@ -148,7 +127,6 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Option<String> {
     }
 }
 
-/// Resolves a site-root-relative path against [`super::SITE_URL`].
 fn absolute(path: &str) -> String {
     format!(
         "{}/{}",
@@ -157,11 +135,6 @@ fn absolute(path: &str) -> String {
     )
 }
 
-/// Joins records to episodes by exact enclosure-URL equality, returning how many episodes
-/// were enriched.
-///
-/// Non-episode records and records matching no episode contribute nothing, so the episode
-/// count is untouched.
 fn apply(records: Vec<Record>, episodes: &mut [Episode]) -> usize {
     let mut by_file: HashMap<String, Record> = records
         .into_iter()
@@ -171,8 +144,6 @@ fn apply(records: Vec<Record>, episodes: &mut [Episode]) -> usize {
 
     let mut enriched = 0;
     for episode in episodes.iter_mut() {
-        // the record is moved out rather than copied: its track listing and body are the
-        // longest strings the catalog holds, and nothing reads it again afterwards
         let Some(record) = by_file.remove(episode.enclosure_url.as_str()) else {
             continue;
         };
@@ -188,9 +159,8 @@ fn apply(records: Vec<Record>, episodes: &mut [Episode]) -> usize {
     enriched
 }
 
-/// Extracts the `/client/client.<hash>.js` path referenced by the shell document.
-///
-/// The hash changes on every upstream deploy and is never hardcoded or persisted.
+/// The bundle's hash changes on every upstream deploy, so it is never hardcoded or
+/// persisted, only read back out of the shell document.
 pub fn find_bundle_url(shell_html: &str) -> Option<String> {
     const MARKER: &str = "client/client.";
 
@@ -210,7 +180,6 @@ pub fn find_bundle_url(shell_html: &str) -> Option<String> {
     None
 }
 
-/// Extracts the target of a `window.location.href = "..."` redirect script.
 fn find_redirect_target(html: &str) -> Option<String> {
     let rest = html.split_once("window.location.href")?.1;
     let rest = rest.trim_start().strip_prefix('=')?.trim_start();
@@ -222,8 +191,8 @@ fn find_redirect_target(html: &str) -> Option<String> {
     (!target.is_empty()).then_some(target)
 }
 
-/// Scans the minified bundle for record object literals, tolerating anything it does not
-/// recognise. A malformed record is skipped rather than propagated.
+/// Tolerates anything it does not recognise: a malformed record is skipped, and a bundle
+/// whose shape has changed yields none, costing the track listings and nothing else.
 pub fn extract_records(bundle_js: &str) -> Vec<Record> {
     const MARKER: &str = "{slug:";
 
@@ -240,16 +209,13 @@ pub fn extract_records(bundle_js: &str) -> Vec<Record> {
                 }
                 search = end;
             }
-            // an unterminated literal ends the record, not the scan: later records are
-            // still worth trying
+
             None => search = start + MARKER.len(),
         }
     }
     records
 }
 
-/// The byte index just past the object literal beginning at `start`, or `None` when it is
-/// never closed.
 fn scan_object(source: &str, start: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut quote: Option<char> = None;
@@ -281,11 +247,9 @@ fn scan_object(source: &str, start: usize) -> Option<usize> {
     None
 }
 
-/// One key's value inside a record literal.
 enum Field<'a> {
-    /// A string literal, with its JS escapes already decoded.
     Text(String),
-    /// Anything else - a number, `!0`, a nested literal - kept verbatim.
+
     Raw(&'a str),
 }
 
@@ -298,8 +262,6 @@ impl Field<'_> {
     }
 }
 
-/// Builds a record from one object literal, or `None` when a field it needs is missing or
-/// the literal is malformed.
 fn parse_record(object: &str) -> Option<Record> {
     let inner = object.strip_prefix('{')?.strip_suffix('}')?;
 
@@ -326,7 +288,6 @@ fn parse_record(object: &str) -> Option<Record> {
             "title" => title = value.text(),
             "special" => {
                 special = match value {
-                    // the bundle is minified, so `true` is written `!0`
                     Field::Raw(raw) => raw == "!0" || raw == "true",
                     Field::Text(text) => text == "true",
                 }
@@ -353,12 +314,8 @@ fn parse_record(object: &str) -> Option<Record> {
     })
 }
 
-/// Whether a slug can name this episode's files.
-///
-/// The slug becomes the episode's identifier, and the identifier names `<slug>.mp3` in
-/// the audio cache, so a record carrying a separator or a parent reference is skipped like
-/// any other malformed one and the episode falls back to its hashed identifier. Every
-/// slug the site publishes is a bare word.
+/// The slug becomes the episode's identifier and names `<slug>.mp3` in the audio cache, so
+/// a separator or a parent reference is refused and the episode falls back to its hash.
 fn is_filesystem_safe(slug: &str) -> bool {
     !slug.is_empty()
         && slug
@@ -366,16 +323,12 @@ fn is_filesystem_safe(slug: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// Converts a record's HTML fragment to plain text, reporting an empty one as absent so a
-/// consumer never mistakes it for real data.
 fn as_text(fragment: Option<String>) -> Option<String> {
     fragment
         .map(|fragment| html_fragment_to_text(&fragment))
         .filter(|text| !text.is_empty())
 }
 
-/// Splits an object literal's interior into its key/value pairs, stopping at the first
-/// thing it cannot read.
 fn fields(inner: &str) -> Vec<(&str, Field<'_>)> {
     let bytes = inner.as_bytes();
     let mut pairs = Vec::new();
@@ -463,7 +416,6 @@ fn fields(inner: &str) -> Vec<(&str, Field<'_>)> {
     pairs
 }
 
-/// Decodes the escapes in a JS string literal's interior.
 fn decode_js_string(raw: &str) -> String {
     let mut decoded = String::with_capacity(raw.len());
     let mut characters = raw.chars().peekable();
@@ -482,7 +434,7 @@ fn decode_js_string(raw: &str) -> String {
             Some('f') => decoded.push('\u{c}'),
             Some('v') => decoded.push('\u{b}'),
             Some('0') => decoded.push('\0'),
-            // a backslash before a newline is a line continuation and produces nothing
+
             Some('\n') => {}
             Some('x') => match hex_scalar(&mut characters, 2) {
                 Some(scalar) => decoded.push(scalar),
@@ -492,7 +444,7 @@ fn decode_js_string(raw: &str) -> String {
                 Some(scalar) => decoded.push(scalar),
                 None => decoded.push('\u{fffd}'),
             },
-            // any other escape stands for the character itself
+
             Some(other) => decoded.push(other),
         }
     }
@@ -500,7 +452,6 @@ fn decode_js_string(raw: &str) -> String {
     decoded
 }
 
-/// Decodes `\uXXXX` or `\u{X..}`, pairing a leading surrogate with the `\uXXXX` after it.
 fn decode_unicode_escape(
     characters: &mut std::iter::Peekable<std::str::Chars<'_>>,
 ) -> Option<char> {
@@ -520,7 +471,7 @@ fn decode_unicode_escape(
     if !(0xd800..0xdc00).contains(&high) {
         return char::from_u32(high);
     }
-    // a leading surrogate is only meaningful together with the trailing one that follows
+
     let mut lookahead = characters.clone();
     if lookahead.next() != Some('\\') || lookahead.next() != Some('u') {
         return None;
@@ -551,8 +502,6 @@ fn hex_scalar(
     char::from_u32(hex_value(characters, width)?)
 }
 
-/// Converts one of the bundle's HTML fragments to plain text: `<br>` becomes a line
-/// break, remaining markup is stripped, and entities are decoded.
 pub fn html_fragment_to_text(fragment: &str) -> String {
     let mut text = String::with_capacity(fragment.len());
     let mut rest = fragment;
@@ -560,7 +509,6 @@ pub fn html_fragment_to_text(fragment: &str) -> String {
     while let Some(open) = rest.find('<') {
         push_text(&mut text, &rest[..open]);
         let Some(close) = rest[open..].find('>') else {
-            // an unterminated tag is not markup, so the remainder is text
             push_text(&mut text, &rest[open..]);
             return finish(&text);
         };
@@ -580,8 +528,6 @@ pub fn html_fragment_to_text(fragment: &str) -> String {
     finish(&text)
 }
 
-/// Appends a text run, collapsing every whitespace run to a single space so the source's
-/// own newlines and indentation do not become line breaks - only `<br>` does.
 fn push_text(text: &mut String, run: &str) {
     for character in decode_entities(run).chars() {
         if character.is_whitespace() {
@@ -594,8 +540,6 @@ fn push_text(text: &mut String, run: &str) {
     }
 }
 
-/// Trims each line and drops the blank lines at either end, keeping interior blanks, which
-/// are the fragment's paragraph breaks.
 fn finish(text: &str) -> String {
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
     let start = lines.iter().position(|line| !line.is_empty());
@@ -609,8 +553,6 @@ fn finish(text: &str) -> String {
     lines[start..=end].join("\n")
 }
 
-/// Decodes the HTML entities the bundle's fragments actually use, leaving anything it does
-/// not recognise as written.
 fn decode_entities(raw: &str) -> String {
     let mut decoded = String::with_capacity(raw.len());
     let mut rest = raw;
@@ -673,7 +615,6 @@ mod tests {
         super::super::feed::parse(FEED).unwrap()
     }
 
-    /// The first `length` bytes of the bundle, rounded down to a character boundary.
     fn head(length: usize) -> &'static str {
         let mut length = length.min(BUNDLE.len());
         while !BUNDLE.is_char_boundary(length) {
@@ -742,7 +683,6 @@ mod tests {
 
     #[test]
     fn a_record_carrying_an_unexpected_field_still_parses() {
-        // episode 62 carries a `special:!0` field the others do not
         let records = extract_records(BUNDLE);
         let special = records
             .iter()
@@ -792,7 +732,7 @@ mod tests {
             episodes[78].links.as_deref(),
             Some("http://datassette.net/")
         );
-        // episode 01 has an empty body upstream, which must read as absent
+
         assert!(episodes[78].body.is_none());
     }
 
@@ -915,8 +855,6 @@ mod tests {
         assert_eq!(slugs, ["a", "c"]);
     }
 
-    /// The slug names `<slug>.mp3` in the audio cache, and `Path::join` with an absolute
-    /// path discards the directory it was joined to.
     #[test]
     fn a_record_whose_slug_could_name_a_file_outside_the_cache_is_skipped() {
         for slug in [
@@ -946,8 +884,6 @@ mod tests {
         }
     }
 
-    /// An episode whose record is refused keeps its feed fields and falls back to the
-    /// identifier derived from its enclosure URL.
     #[test]
     fn an_episode_whose_slug_is_refused_is_left_un_enriched() {
         let mut episodes = feed_episodes();
@@ -1023,13 +959,11 @@ mod tests {
         }
     }
 
-    /// A bundle cut mid-record, so the `about` literal it opens is never closed.
     const MALFORMED: &str = concat!(
         r#"[{slug:"a",type:"episode",order:1,file:"https://a.mp3",tracklist:"unterminated,"#,
         r#"{slug:"about",type:"info",order:0,title:"About""#
     );
 
-    /// A well-formed bundle carrying episodes and no information record.
     const EPISODES_ONLY: &str = r#"[{slug:"a",type:"episode",order:1,title:"1: A",file:"https://a.mp3",tracklist:"A<br>"}]"#;
 
     #[test]
@@ -1046,7 +980,7 @@ mod tests {
             let enrichment = enrich_from(&bundle, &mut episodes);
 
             assert_eq!(episodes.len(), 79);
-            // whatever survives the cut is a whole page, never a half-parsed one
+
             assert!(enrichment.info.iter().all(|page| !page.slug.is_empty()
                 && !page.title.is_empty()
                 && !page.body.is_empty()));
@@ -1087,7 +1021,7 @@ mod tests {
         assert_eq!(enrichment.info[0].title, "About");
         assert_eq!(enrichment.info[1].title, "Credits");
         assert!(enrichment.info.iter().all(|page| !page.body.is_empty()));
-        // the body is plain text, so the fragment's markup never reaches a consumer
+
         assert!(enrichment.info.iter().all(|page| !page.body.contains('<')));
 
         assert_eq!(episodes.len(), 79);
@@ -1167,7 +1101,6 @@ mod tests {
             .expect("no flagged episode");
         let flagged = &episodes[position];
 
-        // identity, audio, and neighbours are what they would be with the flag unset
         assert_eq!(flagged.id(), "sixtytwo");
         assert!(flagged.enclosure_url.starts_with("https://"));
         assert!(flagged.duration_secs > 0);
@@ -1178,8 +1111,6 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreachable_site_leaves_a_usable_catalog_and_raises_no_error() {
-        // port 1 on the loopback refuses immediately, so this exercises the failure path
-        // without needing a network
         let client = reqwest::Client::builder()
             .resolve(
                 "musicforprogramming.net",

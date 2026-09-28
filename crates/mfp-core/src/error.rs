@@ -1,51 +1,41 @@
-//! The crate error type and the stable machine-readable codes clients branch on.
-//!
-//! Every variant maps to exactly one [`ErrorCode`]. The codes are wire contract and stable
-//! across releases; the human-readable messages are not, and must never be parsed.
-
 use serde::{Deserialize, Serialize};
 
-/// A stable machine-readable error code.
-///
-/// Any condition not covered by a more specific code uses [`ErrorCode::Internal`].
+/// The stable machine-readable failure code. Clients branch on this; the human-readable
+/// message is not contract and must never be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ErrorCode {
-    /// The request line was not valid JSON, was not an object, or lacked `id` or `cmd`.
     InvalidRequest,
-    /// The `cmd.type` field named a command the daemon does not implement.
+
     UnknownCommand,
-    /// The arguments parsed but fall outside their permitted domain.
+
     InvalidParams,
-    /// No catalog episode has the requested identifier.
+
     UnknownEpisode,
-    /// The command needs a loaded episode and none is loaded.
+
     NotPlaying,
-    /// The current audio source cannot seek.
+
     SeekUnsupported,
-    /// Audio output, decoding, or the audio transfer failed.
+
     PlaybackFailed,
-    /// The catalog could not be served from cache or network.
+
     CatalogUnavailable,
-    /// A download transfer failed or its verification did not pass.
+
     DownloadFailed,
-    /// No download is running for the named episode.
+
     DownloadNotActive,
-    /// The cache filesystem has less free space than the download requires.
+
     InsufficientSpace,
-    /// Anything not covered by a more specific code.
+
     Internal,
-    /// A spelling this release does not know, which a newer daemon sent.
-    ///
-    /// The protocol names no version, so an added code costs a client that one code rather
-    /// than the whole response line.
+
+    /// A code this release does not know, which a newer daemon sent.
     #[serde(other)]
     Unknown,
 }
 
 impl ErrorCode {
-    /// The code's wire spelling.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidRequest => "invalid_request",
@@ -71,7 +61,6 @@ impl std::fmt::Display for ErrorCode {
     }
 }
 
-/// Any failure the player can report.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -114,13 +103,11 @@ pub enum Error {
     #[error("{0}")]
     Internal(String),
 
-    /// An I/O failure, kept whole so a caller can still read its [`std::io::ErrorKind`].
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
 
 impl Error {
-    /// The stable code for this failure.
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::InvalidRequest(_) => ErrorCode::InvalidRequest,
@@ -199,8 +186,6 @@ mod tests {
         }
     }
 
-    /// A newer daemon may name a code this release has never heard of, and the protocol
-    /// carries no version to negotiate it away.
     #[test]
     fn a_code_this_release_does_not_know_reads_as_unknown() {
         assert_eq!(

@@ -1,16 +1,3 @@
-//! The "a newer version is available" notice: a background check that writes a cache, and a
-//! line rendered from that cache.
-//!
-//! What is displayed is always what a check recorded, never the result of a check the caller
-//! waited for. The check runs on a detached thread that the process may outlive by
-//! milliseconds, so nothing here can make a command slower, and nothing here can make one
-//! fail: every error - offline, rate-limited, unwritable cache - is dropped on the floor.
-//!
-//! The cache is consulted at most once a day, which is what `npm` and `brew` settled on: a
-//! notice is worth one request a day and not one request a command.
-//!
-//! `$MFP_NO_UPDATE_CHECK` turns the whole thing off, request included.
-
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -20,12 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{CURRENT, fetch_latest_release, is_newer};
 
-/// How long a recorded answer stands before another request is made.
 const TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// How long a fast command will wait for its own check, so the first interactive run that
-/// finds an update can say so rather than the one after it. Only ever spent when the check
-/// was going to happen anyway and stderr is a terminal watching for the answer.
 const GRACE: Duration = Duration::from_millis(400);
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,7 +17,6 @@ struct Entry {
     latest_version: String,
 }
 
-/// A check in flight. Dropping it abandons the thread, which is the normal end of a run.
 pub struct Check {
     done: mpsc::Receiver<()>,
 }
@@ -57,8 +39,6 @@ fn read(path: &Path) -> Option<Entry> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-/// Writes through a temporary file so a reader never sees half a document, and so two runs
-/// checking at once cannot interleave into one.
 fn write(path: &Path, entry: &Entry) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -72,10 +52,6 @@ fn fresh(entry: &Entry, now: u64) -> bool {
     now.saturating_sub(entry.checked_at) < TTL.as_secs()
 }
 
-/// Starts a check unless one is not wanted or the recorded answer is still fresh.
-///
-/// The thread only writes the cache; it never prints, and the notice it enables is rendered
-/// by whoever asks [`available`] next.
 pub fn spawn() -> Option<Check> {
     if disabled() {
         return None;
@@ -101,10 +77,6 @@ pub fn spawn() -> Option<Check> {
     Some(Check { done })
 }
 
-/// Waits out [`GRACE`] for `check` when a person is watching, and not at all otherwise.
-///
-/// A detached thread dies with the process, so without this the check a fast command starts
-/// never lands and the cache a scripted-only user has stays empty forever.
 pub fn settle(check: Option<Check>) {
     let Some(check) = check else { return };
     if !std::io::stderr().is_terminal() {
@@ -113,7 +85,6 @@ pub fn settle(check: Option<Check>) {
     let _ = check.done.recv_timeout(GRACE);
 }
 
-/// Whether `check` has finished, so a long-lived caller can pick the answer up mid-run.
 pub fn landed(check: &mut Option<Check>) -> bool {
     let Some(inner) = check else { return false };
     match inner.done.try_recv() {
@@ -125,7 +96,6 @@ pub fn landed(check: &mut Option<Check>) -> bool {
     }
 }
 
-/// The recorded latest version, when it is newer than the running one.
 pub fn available() -> Option<String> {
     if disabled() {
         return None;
@@ -134,11 +104,6 @@ pub fn available() -> Option<String> {
     is_newer(CURRENT, &entry.latest_version).then_some(entry.latest_version)
 }
 
-/// Prints the notice on stderr, where it cannot end up inside piped output.
-///
-/// Suppressed when stderr is not a terminal and when the command's own output is
-/// machine-readable: a notice is for a person reading along, and one nobody reads is noise
-/// in a log file.
 pub fn print(suppress: bool) {
     if suppress || !std::io::stderr().is_terminal() {
         return;
@@ -202,8 +167,6 @@ mod tests {
         assert!(!fresh(&entry, 1_000_000 + TTL.as_secs()));
     }
 
-    /// A cache written by a clock that has since moved backwards would otherwise read as
-    /// aged by an enormous amount, or panic on the subtraction.
     #[test]
     fn an_answer_recorded_in_the_future_is_still_fresh() {
         let entry = Entry {

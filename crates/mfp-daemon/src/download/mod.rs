@@ -1,9 +1,3 @@
-//! Resumable, atomic downloads that never block playback.
-//!
-//! A transfer writes to `<identifier>.mp3.part` and is renamed to `<identifier>.mp3` only
-//! once its length matches what the feed declares, so a truncated transfer is never
-//! observable under the final name.
-
 pub mod cache;
 
 use std::collections::{HashMap, HashSet};
@@ -21,42 +15,23 @@ use tokio::sync::Semaphore;
 use crate::state::{SharedState, lock};
 use cache::EpisodeCacheState;
 
-/// How many bytes a transfer takes on before it republishes its progress.
-///
-/// The audio thread contends for the same lock, so progress is coarse on purpose.
 const PROGRESS_STEP_BYTES: u64 = 64 * 1024;
 
-/// How long [`DownloadManager::evict`] waits for a cancelled transfer to let go of its
-/// part file before deleting it anyway.
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
-/// The most transfers that may run at once, whatever the configuration asks for.
-///
-/// `max_concurrent_downloads` is a `usize` from the user's file and
-/// [`tokio::sync::Semaphore::new`] panics above its own maximum, so an absurd setting would
-/// otherwise end the daemon at startup naming neither the setting nor the file.
 const MAX_CONCURRENT_DOWNLOADS: usize = 64;
 
-/// Runs and tracks transfers, reporting their progress into the shared state so they
-/// appear in ordinary snapshots rather than needing a channel of their own.
 pub struct DownloadManager {
     state: SharedState,
     cache_dir: PathBuf,
     client: reqwest::Client,
-    /// Bounds concurrent transfers; further requests queue rather than saturating the
-    /// upstream host.
+
     permits: Arc<Semaphore>,
-    /// How long [`Self::evict`] waits for a cancelled transfer to let go of its part file.
+
     cancel_grace: Duration,
-    /// The cancellation flag of every transfer accepted and not yet finished.
+
     active: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
-    /// Every episode evicted since it was last requested.
-    ///
-    /// An eviction removes the progress entry, but a publish in flight - the final one of a
-    /// transfer that outlasted [`CANCEL_GRACE`], say - would put it back, leaving the
-    /// interface a download describing a file that has gone, so every publish checks this set
-    /// afterwards and withdraws itself. Bounded by the catalog: an identifier leaves the set
-    /// the moment it is requested again.
+
     evicted: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -86,19 +61,12 @@ impl DownloadManager {
         }
     }
 
-    /// Begins or resumes a transfer, returning as soon as it is accepted.
-    ///
-    /// Resumes from an existing part file with a range request. Refuses with
-    /// [`mfp_core::ErrorCode::InsufficientSpace`] before writing anything when free space is
-    /// short of the remaining bytes. A request for an episode already transferring or cached
-    /// starts nothing and disturbs nothing; the wire protocol answers `download` with a bare
-    /// `ok` either way, so which of the two it was shows only in the snapshot's progress entry.
     pub fn start(&self, episode: &Episode) -> Result<()> {
         let id = episode.id().into_owned();
         if !cache::names_one_entry(&id) {
             return Err(Error::Internal(format!("{id} does not name a cache entry")));
         }
-        // a fresh request supersedes an eviction, so its progress is not withdrawn by one
+
         lock(&self.evicted).remove(&id);
 
         if cache::state_of(&self.cache_dir, &id).is_cached() {
@@ -114,8 +82,6 @@ impl DownloadManager {
 
         let cancel = Arc::new(AtomicBool::new(false));
         {
-            // claimed under one lock, so two requests racing for the same episode cannot
-            // both find the slot free
             let mut active = lock(&self.active);
             if active.contains_key(&id) {
                 return Ok(());
@@ -170,9 +136,6 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Stops an in-progress transfer, leaving its bytes in the part file for a later resume.
-    /// Fails with [`mfp_core::ErrorCode::DownloadNotActive`] when nothing is running for that
-    /// identifier, which is what the `cancel_download` command reports to a client.
     pub fn cancel(&self, id: &str) -> Result<()> {
         if self.request_cancel(id) {
             Ok(())
@@ -181,7 +144,6 @@ impl DownloadManager {
         }
     }
 
-    /// Cancels everything in flight, leaving no file that could be mistaken for complete.
     pub fn shutdown(&self) {
         let active = lock(&self.active);
         for cancel in active.values() {
@@ -189,10 +151,6 @@ impl DownloadManager {
         }
     }
 
-    /// Removes an episode from the cache, returning the bytes reclaimed.
-    ///
-    /// Cancels an in-progress transfer first and waits for it to let go of the part file.
-    /// Refuses rather than deleting a file playback is currently sourcing from.
     pub async fn evict(&self, id: &str) -> Result<u64> {
         if self.is_playing_from_disk(id) {
             return Err(Error::Internal(format!(
@@ -208,14 +166,12 @@ impl DownloadManager {
         }
 
         let reclaimed = cache::evict(&self.cache_dir, id)?;
-        // recorded before the entry goes, so a publish racing this one withdraws itself
-        // rather than describing a file that has just been removed
+
         lock(&self.evicted).insert(id.to_owned());
         withdraw(&self.state, id);
         Ok(reclaimed)
     }
 
-    /// The cache's total size, counting complete files and part files.
     pub fn cache_size(&self) -> u64 {
         cache::total_size(&self.cache_dir)
     }
@@ -224,7 +180,6 @@ impl DownloadManager {
         cache::state_of(&self.cache_dir, id)
     }
 
-    /// Gives up a claimed slot without ever having started a transfer for it.
     fn release(&self, id: &str) {
         lock(&self.active).remove(id);
     }
@@ -233,7 +188,6 @@ impl DownloadManager {
         lock(&self.active).contains_key(id)
     }
 
-    /// Signals a transfer to stop, reporting whether there was one.
     fn request_cancel(&self, id: &str) -> bool {
         let active = lock(&self.active);
         match active.get(id) {
@@ -277,7 +231,6 @@ impl DownloadManager {
     }
 }
 
-/// Replaces this episode's progress entry, or adds one when it has none.
 fn publish(state: &SharedState, entry: DownloadProgress) {
     let mut snapshot = lock(state);
     match snapshot
@@ -290,38 +243,33 @@ fn publish(state: &SharedState, entry: DownloadProgress) {
     }
 }
 
-/// Removes this episode's progress entry.
 fn withdraw(state: &SharedState, id: &str) {
     lock(state).downloads.retain(|download| download.slug != id);
 }
 
-/// Removes this episode's progress entry when the episode was evicted while the entry was
-/// being written, so an eviction is never undone by a publish already in flight.
 fn withdraw_if_evicted(state: &SharedState, evicted: &Mutex<HashSet<String>>, id: &str) {
     if lock(evicted).contains(id) {
         withdraw(state, id);
     }
 }
 
-/// How a transfer ended.
 enum Outcome {
     Completed,
-    /// Cancelled, with the bytes left in the part file for a later resume.
+
     Cancelled(u64),
     Failed(u64, Error),
 }
 
-/// Everything one transfer needs, owned so it can move onto its own task.
 struct Transfer {
     id: String,
     url: String,
-    /// The byte length the feed declares for the enclosure.
+
     total_bytes: u64,
     part: PathBuf,
     complete: PathBuf,
     client: reqwest::Client,
     state: SharedState,
-    /// Shared with the manager; see [`DownloadManager::evicted`].
+
     evicted: Arc<Mutex<HashSet<String>>>,
     cancel: Arc<AtomicBool>,
 }
@@ -329,7 +277,6 @@ struct Transfer {
 impl Transfer {
     async fn run(&self) {
         let outcome = if self.cancelled() {
-            // cancelled while queued, before a single byte was requested
             Outcome::Cancelled(cache::file_len(&self.part).unwrap_or(0))
         } else {
             self.transfer().await
@@ -363,7 +310,6 @@ impl Transfer {
     async fn transfer(&self) -> Outcome {
         let mut existing = cache::file_len(&self.part).unwrap_or(0);
         if existing > self.total_bytes {
-            // longer than the feed declares, so it cannot be a prefix of the real file
             let _ = tokio::fs::remove_file(&self.part).await;
             existing = 0;
         }
@@ -395,8 +341,6 @@ impl Transfer {
             );
         }
 
-        // a 200 to a ranged request means the server sent the whole resource, so the part
-        // file is not a prefix of what is arriving and has to go
         let resuming = existing > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
         if !resuming {
             existing = 0;
@@ -453,14 +397,11 @@ impl Transfer {
                 .open(&self.part)
                 .await?
         } else {
-            // truncating, so a part file the server refused to resume starts over
             tokio::fs::File::create(&self.part).await?
         };
         Ok(file)
     }
 
-    /// The only path to the final name: the part file is renamed only once its length
-    /// matches what the feed declares, and is deleted outright when it does not.
     async fn verify_and_rename(&self, downloaded: u64) -> Outcome {
         let on_disk = cache::file_len(&self.part).unwrap_or(0);
         if on_disk != self.total_bytes {
@@ -510,9 +451,6 @@ mod tests {
 
     use super::*;
 
-    /// A deterministic stand-in for episode audio. Every test asserts against these exact
-    /// bytes, so a resumed file being byte-identical is a claim about content, not just
-    /// length.
     fn fixture(len: usize) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(len);
         let mut value: u32 = 0x1234_5678;
@@ -524,17 +462,14 @@ mod tests {
         bytes
     }
 
-    /// A local HTTP server serving one fixture body. No test touches the network.
     struct Server {
         addr: SocketAddr,
-        /// Every `Range` start the server was asked for, `None` for an unranged request.
+
         ranges: Arc<Mutex<Vec<Option<u64>>>>,
         requests: Arc<AtomicUsize>,
     }
 
     struct ServerOptions {
-        /// When false the server answers a ranged request with the whole resource, which
-        /// is the case the spec makes the client discard its part file for.
         honour_range: bool,
         chunk: usize,
         delay: Duration,
@@ -611,7 +546,7 @@ mod tests {
             if trimmed.is_empty() {
                 break;
             }
-            // hyper writes header names lowercased, so match without regard to case
+
             if let Some(value) = trimmed.to_ascii_lowercase().strip_prefix("range: bytes=") {
                 range_start = value.trim_end_matches('-').parse::<u64>().ok();
             }
@@ -627,8 +562,6 @@ mod tests {
         };
         let slice = &body[start as usize..];
 
-        // one request per connection, announced so the client does not pool a socket this
-        // handler is about to close under it
         let head = if range_start.is_some() && options.honour_range {
             format!(
                 "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{total}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
@@ -690,7 +623,6 @@ mod tests {
             .cloned()
     }
 
-    /// Waits for this episode's download to reach a terminal state.
     async fn settle(state: &SharedState, id: &str) -> DownloadProgress {
         for _ in 0..600 {
             if let Some(entry) = progress(state, id)
@@ -739,7 +671,6 @@ mod tests {
         let state = shared();
         let manager = manager(&state, root.path());
 
-        // the feed declares more than the server actually serves
         manager
             .start(&episode(&server.url(), body.len() as u64 + 4_096))
             .unwrap();
@@ -770,7 +701,6 @@ mod tests {
         let server = Server::start(body.clone(), ServerOptions::default()).await;
         let root = tempfile::tempdir().unwrap();
 
-        // a whole download, for the reference bytes
         let whole_dir = root.path().join("whole");
         let whole_state = shared();
         let whole = manager(&whole_state, &whole_dir);
@@ -783,7 +713,6 @@ mod tests {
         );
         let reference = std::fs::read(cache::audio_path(&whole_dir, "seventynine")).unwrap();
 
-        // and a resume from a part file holding the first 150 000 bytes
         let resumed_dir = root.path().join("resumed");
         std::fs::create_dir_all(&resumed_dir).unwrap();
         std::fs::write(
@@ -804,7 +733,7 @@ mod tests {
         let resumed_bytes = std::fs::read(cache::audio_path(&resumed_dir, "seventynine")).unwrap();
         assert_eq!(resumed_bytes, reference);
         assert_eq!(resumed_bytes, body);
-        // the second request asked only for the bytes that were missing
+
         assert_eq!(server.ranges(), vec![None, Some(150_000)]);
     }
 
@@ -835,7 +764,7 @@ mod tests {
 
         assert_eq!(entry.state, DownloadState::Completed);
         assert_eq!(server.ranges(), vec![Some(90_000)]);
-        // the discarded part file was not appended to, so the result is still the fixture
+
         assert_eq!(
             std::fs::read(cache::audio_path(root.path(), "seventynine")).unwrap(),
             body
@@ -861,7 +790,7 @@ mod tests {
         manager
             .start(&episode(&server.url(), body.len() as u64))
             .unwrap();
-        // let some bytes land before pulling the plug
+
         for _ in 0..200 {
             if progress(&state, "seventynine")
                 .is_some_and(|entry| entry.downloaded_bytes >= PROGRESS_STEP_BYTES)
@@ -881,10 +810,9 @@ mod tests {
             !cache::audio_path(root.path(), "seventynine").exists(),
             "a cancelled download produced a complete file"
         );
-        // the part file really is a prefix of the episode, so resuming is sound
+
         assert_eq!(std::fs::read(&part).unwrap(), body[..kept as usize]);
 
-        // and starting again finishes it without re-fetching what is already there
         for _ in 0..200 {
             if !manager.is_active("seventynine") {
                 break;
@@ -982,7 +910,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = shared();
         let manager = manager(&state, root.path());
-        // larger than any filesystem this test could be run on
+
         let enormous = u64::MAX / 2;
 
         let error = manager
@@ -1010,8 +938,7 @@ mod tests {
         let server = Server::start(body.clone(), ServerOptions::default()).await;
         let state = shared();
         let manager = manager(&state, root.path());
-        // a part file holding all but the last 1 000 bytes: only those are required, and
-        // the free-space check must not refuse on the full declared length
+
         std::fs::write(
             cache::part_path(root.path(), "seventynine"),
             &body[..body.len() - 1_000],
@@ -1047,7 +974,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = shared();
         {
-            // an episode is playing from the network while the download runs
             let mut snapshot = state.lock().unwrap();
             snapshot.playback = PlaybackState::Playing;
             snapshot.source = Some(Source::Stream);
@@ -1087,15 +1013,12 @@ mod tests {
         );
         assert_eq!(*observed.last().unwrap(), body.len() as u64);
 
-        // playback was never touched by the transfer
         let snapshot = state.lock().unwrap();
         assert_eq!(snapshot.playback, PlaybackState::Playing);
         assert_eq!(snapshot.source, Some(Source::Stream));
         assert_eq!(snapshot.position_secs, 1_234.0);
     }
 
-    /// `Semaphore::new` panics above its own maximum, so an absurd setting in the user's
-    /// configuration file would otherwise end the daemon before it served anything.
     #[tokio::test]
     async fn an_absurd_concurrency_setting_is_clamped_rather_than_ending_the_daemon() {
         let root = tempfile::tempdir().unwrap();
@@ -1141,7 +1064,6 @@ mod tests {
             manager.start(&episode).unwrap();
         }
 
-        // with a limit of one, at most one transfer is ever running
         let mut saw_a_queued_entry = false;
         for _ in 0..400 {
             let running = state
@@ -1217,15 +1139,10 @@ mod tests {
         assert_eq!(manager.cache_size(), 0);
     }
 
-    /// The grace period bounds how long an eviction waits, not whether the transfer is over.
-    /// One that outlasts it still publishes its outcome, and without the withdrawal that
-    /// publish would put back the entry the eviction just removed, leaving the interface a
-    /// download describing a file that has gone.
     #[tokio::test]
     async fn a_transfer_outlasting_the_grace_period_does_not_resurrect_its_progress_entry() {
         let body = fixture(500_000);
-        // the body stalls after its first chunk, so the transfer is parked inside the read
-        // rather than at the top of the loop where it would see the cancellation at once
+
         let grace = Duration::from_millis(100);
         let stall = Duration::from_secs(1);
         let server = Server::start(
@@ -1239,8 +1156,7 @@ mod tests {
         .await;
         let root = tempfile::tempdir().unwrap();
         let state = shared();
-        // the grace is injected rather than waited out, so the test turns on the transfer
-        // outlasting it and not on how loaded the machine running it is
+
         let manager = DownloadManager::with_grace(
             Arc::clone(&state),
             root.path().to_path_buf(),
@@ -1265,10 +1181,6 @@ mod tests {
             "the transfer finished inside the grace period, so this proves nothing"
         );
 
-        // and it is still gone once the transfer has published whatever it made of itself
-        // Polled to a deadline rather than slept for `stall`, for the same reason the grace
-        // is injected: a loaded machine can take longer than the stall to wake the transfer,
-        // publish and release the slot
         let deadline = std::time::Instant::now() + stall * 10;
         while manager.is_active("seventynine") && std::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1284,8 +1196,6 @@ mod tests {
         );
     }
 
-    /// An evicted episode's progress stays gone, and the withdrawal is what makes that
-    /// hold, whatever the transfer was about to say.
     #[tokio::test]
     async fn a_publish_for_an_evicted_episode_withdraws_itself() {
         let root = tempfile::tempdir().unwrap();
@@ -1295,12 +1205,11 @@ mod tests {
         assert!(progress(&state, "seventynine").is_some());
 
         manager.evict("seventynine").await.unwrap();
-        // exactly what a transfer that had not noticed the eviction would publish
+
         manager.publish("seventynine", 20, 20, DownloadState::Completed, None);
 
         assert!(progress(&state, "seventynine").is_none());
 
-        // and a fresh request supersedes the eviction rather than being withdrawn by it
         manager.start(&episode("http://127.0.0.1:1/x", 20)).unwrap();
         assert!(progress(&state, "seventynine").is_some());
     }
@@ -1411,7 +1320,6 @@ mod tests {
         let state = shared();
         let manager = manager(&state, root.path());
 
-        // nothing is listening on this port
         manager
             .start(&episode("http://127.0.0.1:1/episode.mp3", 441_000_000))
             .unwrap();

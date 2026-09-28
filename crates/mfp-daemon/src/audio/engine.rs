@@ -1,25 +1,3 @@
-//! The audio thread.
-//!
-//! `rodio` 0.22 has no `Sink`: the playback handle is `rodio::Player`, connected to a
-//! `DeviceSink`. `DeviceSink::log_on_drop(false)` returns `()` and so cannot be chained off
-//! `open_stream()?`; it must be a separate statement, and it must be called, because the
-//! drop-time warning it suppresses would otherwise corrupt the interface.
-//!
-//! The thread owns the player, consumes a command channel, and never awaits. It publishes
-//! into [`SharedState`], which is the only thing the socket server reads, and it touches
-//! only the fields it owns there so the download manager's progress survives alongside it.
-//!
-//! Two boundaries are deliberately left to the socket server, which is the side that can
-//! answer a request:
-//!
-//! - Commands are queued, not answered, so a command that the spec says must fail -
-//!   `play` with nothing loaded, `seek` on a source that cannot seek - is refused by the
-//!   server from the snapshot before it ever reaches here. Reaching here anyway is a
-//!   no-op or an error state, never a panic.
-//! - The position reached at a stop is offered for persistence by reading the snapshot
-//!   *before* [`AudioCommand::Stop`] is sent. End of episode sends nothing, which is why
-//!   no resume position is recorded there.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,19 +14,12 @@ use super::source::{SampleTap, Tap};
 use super::spectrum::Analyser;
 use crate::state::SharedState;
 
-/// How long the thread waits for a command before republishing. The socket server
-/// broadcasts level-triggered at 4 Hz, so a published position must be at least that fresh;
-/// it is also how promptly the end of an episode is noticed.
 const TICK: Duration = Duration::from_millis(100);
 
-/// How often the spectrum is recomputed. Snapshots caused by a spectrum change alone are
-/// capped at 20 per second, so a faster analysis would only produce frames nothing carries.
 const ANALYSIS_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub enum AudioCommand {
-    /// Load an episode and begin playing it from `start_secs`, preferring `local_path`
-    /// when it names a complete verified copy.
     Load {
         episode: Box<Episode>,
         local_path: Option<PathBuf>,
@@ -57,40 +28,26 @@ pub enum AudioCommand {
     Play,
     Pause,
     Toggle,
-    /// End playback, release the source, and clear the loaded episode.
+
     Stop,
-    /// Seek to an absolute target. A seek accepted while another is in flight supersedes
-    /// it; neither request is an error.
+
     Seek {
         target_secs: f64,
     },
-    /// Stop audio and end the thread.
+
     Shutdown,
 }
 
-/// A handle on the audio thread.
 pub struct AudioEngine {
     commands: Sender<AudioCommand>,
     thread: JoinHandle<()>,
 }
 
 impl AudioEngine {
-    /// Starts the thread.
-    ///
-    /// `runtime` lets it drive the streamed reader without an async audio path; `state`
-    /// is the snapshot it publishes position, playback state, and errors into.
-    ///
-    /// The handle must belong to a multi-threaded runtime. The audio thread reaches the
-    /// network through `Handle::block_on`, and a current-thread runtime is driven only by
-    /// the thread blocked on it, so a streamed source would never finish opening.
     pub fn spawn(runtime: tokio::runtime::Handle, state: SharedState) -> Result<Self> {
         Self::spawn_with(runtime, state, Output::open_device)
     }
 
-    /// Starts the thread over an output the caller names.
-    ///
-    /// The output is built on the audio thread because it has to live and die there, so
-    /// whether it opened comes back over a handshake channel rather than as a return value.
     fn spawn_with(
         runtime: tokio::runtime::Handle,
         state: SharedState,
@@ -124,25 +81,17 @@ impl AudioEngine {
         }
     }
 
-    /// Queues a command. Never blocks waiting on audio.
     pub fn send(&self, command: AudioCommand) -> Result<()> {
         self.commands
             .send(command)
             .map_err(|_| Error::PlaybackFailed("The audio thread is gone".into()))
     }
 
-    /// Stops audio and joins the thread.
     pub fn shutdown(self) {
         let _ = self.commands.send(AudioCommand::Shutdown);
         let _ = self.thread.join();
     }
 
-    /// An engine that collects its commands instead of playing them, together with the
-    /// receiver holding them.
-    ///
-    /// Lets the daemon's wiring - what it asks the audio thread to do and what it persists
-    /// around that - be tested where there is no audio device. Commands queue only while
-    /// the caller holds the receiver.
     #[cfg(test)]
     pub(crate) fn recording() -> (Self, Receiver<AudioCommand>) {
         let (commands, requests) = mpsc::channel();
@@ -154,10 +103,9 @@ impl AudioEngine {
     }
 }
 
-/// Where the engine's samples go.
 struct Output {
     player: rodio::Player,
-    /// Held for as long as the thread runs: dropping it closes the device.
+
     _sink: Option<rodio::MixerDeviceSink>,
 }
 
@@ -168,8 +116,7 @@ impl Output {
         let mut sink = builder
             .open_stream()
             .map_err(|error| Error::PlaybackFailed(format!("No audio output stream: {error}")))?;
-        // Returns `()`, so it cannot be chained off `open_stream()?`. Without it the
-        // drop-time warning goes to stderr and corrupts a terminal interface sharing it
+
         sink.log_on_drop(false);
         let player = rodio::Player::connect_new(sink.mixer());
         Ok(Self {
@@ -178,14 +125,6 @@ impl Output {
         })
     }
 
-    /// A player with no device behind it, consumed by a thread of its own at the rate a
-    /// device would.
-    ///
-    /// Lets the engine be exercised where there is no audio hardware, which is every
-    /// continuous integration machine. The pace comes from the test fixture's own sample
-    /// rate rather than from the queue, which reports the rate of whatever it is holding and
-    /// so reports silence at a rate of its own between sources; consuming faster than real
-    /// time would let a position race past the window a test is waiting for.
     #[cfg(test)]
     fn open_headless() -> Result<Self> {
         const CHUNK: u32 = super::testing::SAMPLE_RATE / 100;
@@ -210,13 +149,6 @@ impl Output {
     }
 }
 
-// == Spectrum Analysis ==
-
-/// The spectrum analysis, running on a thread of its own.
-///
-/// Deliberately neither the audio thread nor the engine thread: the transform must never
-/// sit between the device and a sample, nor delay a published position. It reads the
-/// samples the tap has collected and writes the one snapshot field nothing else writes.
 struct Analysis {
     running: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -250,12 +182,6 @@ impl Drop for Analysis {
     }
 }
 
-/// Computes one frame and publishes it.
-///
-/// Nothing is computed unless audio is actually playing: a pause, a stop, a seek in
-/// flight, and a failure all mean nobody is hearing a signal to analyse. The transform
-/// runs with neither the shared state nor the tap held, so a slow frame delays nothing -
-/// a frame it cannot start is skipped outright rather than queued.
 fn analyse(state: &SharedState, tap: &SampleTap, analyser: &mut Analyser) {
     {
         let Ok(mut snapshot) = state.lock() else {
@@ -275,43 +201,31 @@ fn analyse(state: &SharedState, tap: &SampleTap, analyser: &mut Analyser) {
     let Ok(mut snapshot) = state.lock() else {
         return;
     };
-    // Playback can have ended while the transform ran, and a spectrum outliving the audio
-    // it describes is exactly what "analysis ceases when playback does" forbids
+
     snapshot.spectrum = (snapshot.playback == PlaybackState::Playing).then_some(spectrum);
 }
 
-/// The episode the engine is currently holding open.
 struct Loaded {
-    /// Shared rather than owned: every rebuild needs it while `self` is borrowed mutably,
-    /// and an enriched episode carries a whole information page to copy
     episode: Arc<Episode>,
     local_path: Option<PathBuf>,
-    /// None until a chain has actually been built. A guess published here shows a client
-    /// `stream` for an episode that turns out to be local
+
     kind: Option<Source>,
     seekable: bool,
-    /// What the range probe learned about this enclosure, kept because the answer cannot
-    /// change under a session and asking costs a request per rebuild
+
     range_support: Option<bool>,
 }
 
-/// What a requested seek target turns out to mean.
 enum SeekOutcome {
-    /// A target a decoder chain can be built at.
     At(f64),
-    /// At or past the end, which finishes the episode rather than erroring.
+
     EndOfEpisode,
 }
 
-/// What arrived while a rebuild was running.
 enum Supersede {
-    /// Nothing that changes where this seek is going.
     None,
-    /// A later seek. The chain just built is dropped unheard and the new target is built
-    /// instead, so only the latest target is ever honoured.
+
     Target(f64),
-    /// A command that abandons the seek outright: stopping, loading another episode, or
-    /// shutting down. It is carried back out to be dispatched rather than run in place.
+
     Abandon(AudioCommand),
 }
 
@@ -320,18 +234,17 @@ struct Engine {
     state: SharedState,
     output: Output,
     loaded: Option<Loaded>,
-    /// Where the current decoder's zero sits in the episode. Every rebuild restarts the
-    /// decoder's clock, so this is what keeps the reported position honest.
+
     base_offset_secs: f64,
-    /// The transport state the user has asked for, which survives a rebuild spanning a pause.
+
     want_paused: bool,
     playback: PlaybackState,
     seek_target_secs: Option<f64>,
     error: Option<ErrorObject>,
     stopping: bool,
-    /// The samples the appended chain is producing, read by [`Analysis`]
+
     tap: SampleTap,
-    /// Stopped when the engine is dropped, which is what ends the analysis thread
+
     _analysis: Analysis,
 }
 
@@ -359,9 +272,6 @@ impl Engine {
         self.publish();
         loop {
             match requests.recv_timeout(TICK) {
-                // A command that abandoned a rebuild is dispatched here rather than where it
-                // was found: handling it in place re-enters the rebuild, and a client can
-                // queue more loads than this thread has stack for
                 Ok(command) => {
                     let mut pending = Some(command);
                     while let Some(command) = pending {
@@ -383,8 +293,6 @@ impl Engine {
         self.publish();
     }
 
-    /// Runs one command, returning the command that abandoned a rebuild it started, if
-    /// any, for the caller to dispatch in turn.
     fn handle(
         &mut self,
         command: AudioCommand,
@@ -420,15 +328,7 @@ impl Engine {
         }
     }
 
-    /// Turns a requested target into what the engine should do about it.
-    ///
-    /// The only place this normalisation lives. Both `seek` and `drain_while_seeking`
-    /// accept a target straight from a client, and the two carrying their own copies of
-    /// the rule is how a superseding seek came to skip the end of an episode and reach
-    /// the decoder unbounded.
     fn resolve(&self, target_secs: f64) -> SeekOutcome {
-        // `max` yields the operand that is not NaN, so a nonsensical target lands at the
-        // start rather than propagating into a position nothing can hold
         let target = target_secs.max(0.0);
         let duration = self
             .loaded
@@ -474,8 +374,6 @@ impl Engine {
             return Some(abandoned);
         }
 
-        // A resume position cannot be honoured by a source that turned out not to seek
-        // Streaming it sequentially from the start beats refusing to play it at all
         if start > 0.0
             && self
                 .error
@@ -502,7 +400,6 @@ impl Engine {
         }
 
         let SeekOutcome::At(target) = self.resolve(target_secs) else {
-            // At or past the end is the end of the episode, not an error and not a stall
             self.release();
             return None;
         };
@@ -517,24 +414,16 @@ impl Engine {
         self.rebuild_and_install(target, requests)
     }
 
-    /// The forward-only fast path.
-    ///
-    /// Returns false when the seek has to be rebuilt instead, which is every backward
-    /// target and any target the player refused. An error here is a trigger to rebuild,
-    /// never something the caller sees: it is exactly the condition that leaves the
-    /// decoder wedged, and the rebuild throws that decoder away.
     fn seek_in_place(&mut self, target_secs: f64) -> bool {
         if seek::plan(self.position_secs(), target_secs) != SeekPlan::InPlaceThenRebuild {
             return false;
         }
-        // `try_seek` reports success without doing anything when the queue is empty, so
-        // an empty player has to take the rebuild path or the position would start lying
+
         if self.output.player.empty() {
             return false;
         }
         let decoder_target = target_secs - self.base_offset_secs;
-        // A target no `Duration` can hold takes the rebuild path, which reports the
-        // refusal once rather than having this path grow an error channel of its own
+
         let Ok(decoder_target) = seek::duration_from_secs(decoder_target) else {
             return false;
         };
@@ -542,8 +431,7 @@ impl Engine {
         match self.output.player.try_seek(decoder_target) {
             Ok(()) => {
                 self.seek_target_secs = None;
-                // The same rule `discard_chain` keeps: audio from before the jump must not
-                // be analysed alongside the audio that replaced it
+
                 self.tap.clear();
                 self.playback = self.transport_state();
                 true
@@ -555,8 +443,6 @@ impl Engine {
         }
     }
 
-    /// Builds the decoder chain at `target_secs` and installs it, starting over when a
-    /// later seek superseded the target while the rebuild was running.
     fn rebuild_and_install(
         &mut self,
         mut target_secs: f64,
@@ -607,12 +493,6 @@ impl Engine {
         }
     }
 
-    /// Consumes whatever arrived while a rebuild was running.
-    ///
-    /// Transport commands apply at once and leave the seek alone, so pausing mid-seek
-    /// arrives at the target paused. A later seek replaces the target, normalised by the
-    /// same rule `seek` applies. Stopping, loading another episode, or shutting down
-    /// abandons the seek outright, and that command is carried back out to be dispatched.
     fn drain_while_seeking(&mut self, requests: &Receiver<AudioCommand>) -> Supersede {
         let mut target = None;
         loop {
@@ -621,15 +501,12 @@ impl Engine {
                 Ok(AudioCommand::Play) => self.want_paused = false,
                 Ok(AudioCommand::Pause) => self.want_paused = true,
                 Ok(AudioCommand::Toggle) => self.want_paused = !self.want_paused,
-                // Anything else ends this seek. It is carried out rather than run here so
-                // that the rebuild which found it unwinds first
+
                 Ok(command) => return Supersede::Abandon(command),
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
         match target {
-            // Normalised by the same rule `seek` applies, so a target past the end still
-            // finishes the episode rather than reaching the decoder as a seek that fails
             Some(target) => match self.resolve(target) {
                 SeekOutcome::At(target) => Supersede::Target(target),
                 SeekOutcome::EndOfEpisode => Supersede::Abandon(AudioCommand::Stop),
@@ -662,16 +539,11 @@ impl Engine {
         self.playback = self.transport_state();
     }
 
-    /// Drops whatever the player is holding.
-    ///
-    /// `clear` waits for the queue to flush, and a paused source still yields silence to
-    /// the device, so it is safe to call in either transport state - but it is called
-    /// unpaused so the flush can never wait on a source nothing is pulling from.
     fn discard_chain(&mut self) {
         self.output.player.play();
         self.output.player.clear();
         self.base_offset_secs = 0.0;
-        // Audio from before the teardown must not be analysed alongside what replaces it
+
         self.tap.clear();
     }
 
@@ -693,11 +565,6 @@ impl Engine {
         }
     }
 
-    /// Ends playback and clears the loaded episode.
-    ///
-    /// Stopping and reaching the end of the audio land in the same place deliberately:
-    /// what separates them is that a stop has its position read from the snapshot before
-    /// the command is sent, and the end of an episode has nothing read at all.
     fn release(&mut self) {
         self.discard_chain();
         self.loaded = None;
@@ -707,8 +574,6 @@ impl Engine {
         self.playback = PlaybackState::Stopped;
     }
 
-    /// Notices that the audio ran out. Nothing advances to another episode; the spec is
-    /// explicit that the player stops.
     fn notice_end_of_audio(&mut self) {
         if !matches!(
             self.playback,
@@ -723,10 +588,6 @@ impl Engine {
         self.release();
     }
 
-    /// Stops audio and reports the failure, keeping the last position that corresponded to
-    /// audible audio. A cleared player's clock reads zero, so folding the position into the
-    /// base offset first is what preserves it; audio never continues under a position that
-    /// does not describe it.
     fn fail(&mut self, error: &Error) {
         let reached = self.position_secs();
         self.discard_chain();
@@ -745,9 +606,6 @@ impl Engine {
         }
     }
 
-    /// The position of the audio actually being produced. Every rebuild restarts the
-    /// decoder's clock at zero, so this is the base offset plus the player's own clock and
-    /// never the raw player position.
     fn position_secs(&self) -> f64 {
         if self.loaded.is_none() || self.playback == PlaybackState::Stopped {
             return 0.0;
@@ -755,7 +613,6 @@ impl Engine {
         reported_position(self.base_offset_secs, self.output.player.get_pos())
     }
 
-    /// Writes the fields the audio thread owns, leaving the download manager's alone.
     fn publish(&self) {
         let Ok(mut snapshot) = self.state.lock() else {
             tracing::error!("the shared state is poisoned; playback continues unpublished");
@@ -771,23 +628,18 @@ impl Engine {
         snapshot.position_secs = self.position_secs();
         snapshot.seek_target_secs = self.seek_target_secs;
         snapshot.duration_secs = episode.map(|episode| episode.duration_secs as f64);
-        // The total comes from the feed rather than from decoding a 441 MB file, so it is
-        // always approximate
+
         snapshot.duration_approximate = true;
         snapshot.seekable = self.loaded.as_ref().is_some_and(|loaded| loaded.seekable);
         snapshot.source = self.loaded.as_ref().and_then(|loaded| loaded.kind);
         snapshot.error = self.error.clone();
-        // [`Analysis`] writes this while playing; withdrawing it here is what makes a
-        // pause or a stop take effect at once rather than at the next analysis frame
+
         if self.playback != PlaybackState::Playing {
             snapshot.spectrum = None;
         }
     }
 }
 
-/// The position to report for a decoder whose clock restarts at zero on every rebuild. Its
-/// own function because it is the whole of the offset rule, the one place a mistake would
-/// silently show the wrong time.
 fn reported_position(base_offset_secs: f64, player_position: Duration) -> f64 {
     base_offset_secs + player_position.as_secs_f64()
 }
@@ -801,8 +653,6 @@ mod tests {
     use super::*;
     use crate::audio::testing;
 
-    /// Long enough to cover a rebuild of the fixture many times over, short enough that a
-    /// wrong answer is a fast failure.
     const SETTLE: Duration = Duration::from_secs(5);
 
     struct Harness {
@@ -814,8 +664,6 @@ mod tests {
 
     impl Harness {
         fn new() -> Self {
-            // Multi-threaded on purpose: the audio thread reaches the network through
-            // `Handle::block_on`, which cannot drive a current-thread runtime from off it
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
                 .enable_all()
@@ -852,13 +700,10 @@ mod tests {
             self.state.lock().unwrap().clone()
         }
 
-        /// Waits for the published snapshot to satisfy `settled`, returning it.
         fn settle(&self, what: &str, settled: impl Fn(&StateSnapshot) -> bool) -> StateSnapshot {
             self.settle_within(SETTLE, what, settled)
         }
 
-        /// [`Harness::settle`] with a deadline of its own, for the streamed tests, where a
-        /// distant rebuild is measured to take up to eleven seconds.
         fn settle_within(
             &self,
             patience: Duration,
@@ -879,11 +724,6 @@ mod tests {
             }
         }
 
-        /// Waits until playback has settled at `target`.
-        ///
-        /// The window matters: a predicate that only checked `position >= target` would
-        /// be satisfied by the snapshot from *before* a backward seek and would pass
-        /// however wrong the seek was.
         fn settled_at(&self, target: f64, playback: PlaybackState) -> StateSnapshot {
             self.settle(&format!("{playback:?} at {target}s"), |snapshot| {
                 snapshot.playback == playback
@@ -932,8 +772,6 @@ mod tests {
 
     #[test]
     fn the_reported_position_is_the_base_offset_plus_the_player_clock() {
-        // The decoder's clock restarts at zero after a rebuild, so a player reading 0
-        // after a seek to 3600s must still report 3600s, and must advance from there
         assert_eq!(reported_position(3600.0, Duration::ZERO), 3600.0);
         assert_eq!(reported_position(3600.0, Duration::from_secs(60)), 3660.0);
         assert_eq!(reported_position(0.0, Duration::from_secs(12)), 12.0);
@@ -957,9 +795,6 @@ mod tests {
         assert!(snapshot.error.is_none());
     }
 
-    /// The identifier the snapshot carries is the one the store is keyed by and the one a
-    /// client passes back, so it has to be `Episode::id()` and not the enrichment slug it
-    /// falls back from. An episode enrichment never reached is where the two part company.
     #[test]
     fn the_published_identifier_is_the_episode_id_even_without_a_slug() {
         let harness = Harness::new();
@@ -978,21 +813,12 @@ mod tests {
         assert_eq!(snapshot.episode.unwrap().slug, id);
     }
 
-    /// The regression test for the bug this group exists to avoid.
-    ///
-    /// A backward seek on a live decoder wedges it permanently, after which every seek
-    /// fails while `get_pos` keeps advancing. Driving the whole engine forward, back, and
-    /// forward again proves the rebuild path is what runs and that the reported position
-    /// follows the target rather than the wedged decoder's fiction.
     #[test]
     fn a_forward_then_backward_then_forward_seek_all_succeed_with_honest_positions() {
         let harness = Harness::new();
         harness.load(0.0);
         harness.playing_at(0.0);
 
-        // The backward step is the one that used to wedge the decoder, and it is the
-        // step the rebuild path always runs for; the forward steps may take the in-place
-        // fast path, which `seek::plan` is unit-tested to allow only in that direction
         for target in [4.0, 1.0, 3.0] {
             harness.send(AudioCommand::Seek {
                 target_secs: target,
@@ -1036,13 +862,10 @@ mod tests {
     #[test]
     fn a_seek_superseded_by_a_later_one_settles_on_the_later_target() {
         let harness = Harness::new();
-        // Starting part-way in means the first seek of the pair is backward, which is
-        // always a rebuild, which is the path a second seek can supersede
+
         harness.load(4.0);
         harness.playing_at(4.0);
 
-        // Both are queued before the first rebuild can finish, so the first target is
-        // dropped unheard rather than played
         harness.send(AudioCommand::Seek { target_secs: 1.0 });
         harness.send(AudioCommand::Seek { target_secs: 3.0 });
 
@@ -1057,7 +880,6 @@ mod tests {
         harness.load(4.0);
         harness.playing_at(4.0);
 
-        // Backward, so the seek is mid-rebuild when the stop lands on it
         harness.send(AudioCommand::Seek { target_secs: 1.0 });
         harness.send(AudioCommand::Stop);
 
@@ -1101,13 +923,10 @@ mod tests {
         assert!(snapshot.error.is_none());
     }
 
-    /// The rule `seek` applies at the end of an episode has to be the rule a seek
-    /// arriving mid-rebuild gets too. `drain_while_seeking` used to carry no such rule at
-    /// all, which turned the end of an episode into a decoder failure.
     #[test]
     fn a_superseding_target_past_the_end_finishes_the_episode_rather_than_erroring() {
         let harness = Harness::new();
-        // Backward, so the first seek is mid-rebuild when the second lands on it
+
         harness.load(4.0);
         harness.playing_at(4.0);
 
@@ -1123,11 +942,6 @@ mod tests {
         assert!(snapshot.error.is_none());
     }
 
-    /// The critical one: a target no `Duration` can hold, on an episode whose feed entry
-    /// declares no duration, so the end-of-episode rule cannot catch it first. Every
-    /// conversion on the way to the decoder used to be `Duration::from_secs_f64`, which
-    /// panics here and takes the audio thread - and therefore all later playback - with
-    /// it. The last two lines are the ones that would have failed.
     #[test]
     fn a_target_no_duration_could_hold_is_refused_rather_than_killing_the_thread() {
         let harness = Harness::new();
@@ -1142,8 +956,6 @@ mod tests {
             snapshot.playback == PlaybackState::Playing
         });
 
-        // Backward first, so the hostile target may arrive either at `seek` directly or
-        // at `drain_while_seeking` mid-rebuild; both used to reach the same panic
         harness.send(AudioCommand::Seek { target_secs: 1.0 });
         harness.send(AudioCommand::Seek { target_secs: 1e20 });
 
@@ -1159,16 +971,12 @@ mod tests {
         harness.playing_at(0.0);
     }
 
-    /// Loading another episode mid-seek abandons the seek and runs the load. The command
-    /// is returned to the run loop rather than handled where it was found, so a queue of
-    /// them unwinds instead of nesting one rebuild inside the next.
     #[test]
     fn loading_another_episode_during_a_seek_abandons_it_and_loads() {
         let harness = Harness::new();
         harness.load(4.0);
         harness.playing_at(4.0);
 
-        // Backward, so the load lands while the seek is mid-rebuild
         harness.send(AudioCommand::Seek { target_secs: 1.0 });
         let mut second = harness.fixture.episode.clone();
         second.title = "Second".into();
@@ -1215,25 +1023,18 @@ mod tests {
         assert!(snapshot.episode.is_none());
         assert!(snapshot.error.is_none());
 
-        // Loading afterwards proves the engine consumed all of that rather than dying on
-        // one of the commands, which a snapshot that never changed could not tell apart
         harness.load(0.0);
         harness.playing_at(0.0);
     }
 
-    /// Requires an audio output device: the assertion is that playback reaches the end
-    /// of the fixture within [`SETTLE`], and a host with no device does not drain the
-    /// stream at wall-clock rate. Not run by default:
-    /// `cargo test -p mfp-daemon -- --ignored`.
     #[test]
     #[ignore = "requires an audio output device"]
     fn the_end_of_the_audio_stops_playback_without_advancing_to_anything_else() {
         let harness = Harness::new();
-        // Loading close to the end keeps the wait short; the fixture runs six seconds
+
         let start = f64::from(testing::DURATION_SECS) - 1.0;
         harness.load(start);
-        // Waiting for playback first matters: without it the stopped state the assertion
-        // is looking for is the one the engine started in, and the test proves nothing
+
         harness.playing_at(start);
 
         let snapshot = harness.settle("the episode to end", |snapshot| {
@@ -1261,12 +1062,10 @@ mod tests {
             failed.error.as_ref().map(|error| error.code),
             Some(ErrorCode::PlaybackFailed)
         );
-        // No chain was ever built, so there is nothing true to say about the source. A
-        // guess here shows a client `stream` for an episode that might have been local
+
         assert!(failed.source.is_none());
         assert!(!failed.error.unwrap().message.is_empty());
 
-        // The engine is still usable afterwards, which separates a failure from a wedge
         harness.load(0.0);
         let recovered = harness.playing_at(0.0);
         assert!(recovered.error.is_none());
@@ -1278,8 +1077,6 @@ mod tests {
         harness.load(3.0);
         harness.playing_at(3.0);
 
-        // Removing the file leaves the already-open decoder working, so the failure has
-        // to fall on a rebuild - which is what a backward target always takes
         let audio = std::fs::read(&harness.fixture.path).unwrap();
         std::fs::remove_file(&harness.fixture.path).unwrap();
         harness.send(AudioCommand::Seek { target_secs: 0.5 });
@@ -1293,18 +1090,12 @@ mod tests {
             failed.position_secs
         );
 
-        // A failure must not cost the ability to seek: with the source reachable again
-        // the next seek is attempted afresh and reaches its target
         std::fs::write(&harness.fixture.path, &audio).unwrap();
         harness.send(AudioCommand::Seek { target_secs: 1.0 });
         let recovered = harness.playing_at(1.0);
         assert!(recovered.error.is_none());
     }
 
-    // == Spectrum ==
-
-    /// The fixture's first second is silence by construction, so a spectrum test has to
-    /// start where the audio has an amplitude to report.
     const AUDIBLE_START: f64 = 1.0;
 
     fn has_signal(snapshot: &StateSnapshot) -> bool {
@@ -1314,7 +1105,6 @@ mod tests {
             .is_some_and(|spectrum| spectrum.0.iter().any(|&bin| bin > 0))
     }
 
-    /// A tap holding a full window of audible audio.
     fn primed_tap() -> SampleTap {
         let tap = SampleTap::new();
         let samples: Vec<f32> = (0..super::super::spectrum::FFT_SIZE)
@@ -1329,9 +1119,6 @@ mod tests {
         tap
     }
 
-    /// The direct check on the one condition guarding the transform. A seek in flight is
-    /// the state a timing-based test could not pin down, and it must produce nothing for
-    /// the same reason a pause does: nobody is hearing a signal to analyse.
     #[test]
     fn nothing_is_analysed_in_any_state_but_playing() {
         let tap = primed_tap();
@@ -1360,8 +1147,6 @@ mod tests {
             );
         }
 
-        // The same call while playing does produce one, so the assertions above are the
-        // guard doing its job rather than the analyser being broken
         let state: SharedState = Arc::new(Mutex::new(StateSnapshot::stopped()));
         state.lock().unwrap().playback = PlaybackState::Playing;
         analyse(&state, &tap, &mut analyser);
@@ -1394,8 +1179,6 @@ mod tests {
         });
         assert!(paused.spectrum.is_none());
 
-        // Still absent a few analysis intervals later, which is what "no further spectra
-        // are produced" means as distinct from one stale frame being cleared
         std::thread::sleep(ANALYSIS_INTERVAL * 4);
         assert!(harness.snapshot().spectrum.is_none());
     }
@@ -1426,13 +1209,6 @@ mod tests {
         assert!(harness.snapshot().spectrum.is_none());
     }
 
-    /// Streams the longest episode the real feed lists and exercises the whole streamed
-    /// path against it: fast start, the range probe, and seeking in both directions.
-    ///
-    /// This is the only test that touches the network, so it is not run by default:
-    /// `cargo test -p mfp-daemon -- --ignored`. The offline tests cover the same
-    /// behaviour over a local fixture; what only upstream can answer is whether it still
-    /// honours range requests, which is what makes seeking possible at all.
     #[test]
     #[ignore = "reaches musicforprogramming.net and datashat.net"]
     fn a_real_streamed_episode_starts_quickly_and_seeks_in_both_directions() {
@@ -1457,8 +1233,6 @@ mod tests {
             start_secs: 0.0,
         });
 
-        // Only the leading 64 KiB is prefetched before the decoder is handed the reader,
-        // which is what keeps a 441 MB file audible this quickly
         let playing =
             harness.settle_within(Duration::from_secs(15), "audio to start", |snapshot| {
                 snapshot.playback == PlaybackState::Playing && snapshot.position_secs > 0.0
@@ -1474,7 +1248,6 @@ mod tests {
             "upstream stopped answering range requests with partial content"
         );
 
-        // Forward, then backward: the pair that wedges a decoder seeked in place
         for target in [300.0, 60.0] {
             harness.send(AudioCommand::Seek {
                 target_secs: target,
@@ -1493,23 +1266,10 @@ mod tests {
         }
     }
 
-    /// Set on the child half of the drop test below.
     const DROP_CHILD: &str = "MFP_TEST_DROP_CHILD";
 
     const DROP_TEST: &str = "audio::engine::tests::dropping_the_player_writes_nothing_to_stderr";
 
-    /// `MixerDeviceSink` starts with `log_on_drop` set, and prints its drop-time warning
-    /// with `eprintln!` unless rodio's `tracing` feature is on, which it is not here. So
-    /// nothing but the `log_on_drop(false)` call keeps that line off the terminal the
-    /// interface is drawing into.
-    ///
-    /// The check runs in a child process on purpose. `libtest` redirects `eprintln!` into
-    /// its own buffer, so a parent that captured file descriptor 2 would see an empty
-    /// stderr whether or not the warning was suppressed - the test would pass for the
-    /// wrong reason. A child run with `--nocapture` writes to a real pipe instead.
-    ///
-    /// Requires an audio output device, so it is not run by default:
-    /// `cargo test -p mfp-daemon -- --ignored`.
     #[test]
     #[ignore = "requires an audio output device"]
     fn dropping_the_player_writes_nothing_to_stderr() {

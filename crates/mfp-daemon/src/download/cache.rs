@@ -1,31 +1,22 @@
-//! What the download cache holds, how big it is, and removing episodes from it.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use mfp_core::error::{Error, Result};
 
-/// The suffix a complete verified episode carries.
 const COMPLETE_SUFFIX: &str = ".mp3";
 
-/// The suffix an in-progress transfer carries.
 const PART_SUFFIX: &str = ".mp3.part";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EpisodeCacheState {
     NotCached,
-    /// A part file exists. It is never a playback source.
-    Partial {
-        bytes: u64,
-    },
-    /// A complete verified file exists.
-    Cached {
-        bytes: u64,
-    },
+
+    Partial { bytes: u64 },
+
+    Cached { bytes: u64 },
 }
 
 impl EpisodeCacheState {
-    /// How many bytes this episode occupies, zero when it is not cached.
     pub fn bytes(self) -> u64 {
         match self {
             Self::NotCached => 0,
@@ -33,37 +24,23 @@ impl EpisodeCacheState {
         }
     }
 
-    /// Whether a complete verified file exists, the only state playback may source from disk.
     pub fn is_cached(self) -> bool {
         matches!(self, Self::Cached { .. })
     }
 }
 
-/// Whether this identifier names one file inside the cache directory and nothing else.
-///
-/// The same property [`mfp_core::Episode::id`] documents and `mfp-core` refuses an
-/// enrichment slug for, enforced again at the sink: a separator, a parent reference or a NUL
-/// from anywhere - a malformed feed, a future caller that skips the catalog - would otherwise
-/// let [`evict`] remove a file outside the cache and a transfer write one there.
 pub fn names_one_entry(id: &str) -> bool {
     !id.is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', '\0'])
 }
 
-/// Where a complete verified episode lives.
-///
-/// A pure join: the three entry points that touch the filesystem by identifier -
-/// [`state_of`], [`evict`] and [`crate::download::DownloadManager::start`] - gate on
-/// [`names_one_entry`] first.
 pub fn audio_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}{COMPLETE_SUFFIX}"))
 }
 
-/// Where an in-progress transfer writes. A pure join, gated as [`audio_path`] is.
 pub fn part_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}{PART_SUFFIX}"))
 }
 
-/// The length of `path`, or `None` when it is absent or is not a regular file.
 pub(crate) fn file_len(path: &Path) -> Option<u64> {
     std::fs::metadata(path)
         .ok()
@@ -71,13 +48,7 @@ pub(crate) fn file_len(path: &Path) -> Option<u64> {
         .map(|metadata| metadata.len())
 }
 
-/// What the cache holds for this episode.
-///
-/// A complete file wins over a part file: once the rename has happened the episode is
-/// cached whatever else is lying beside it.
 pub fn state_of(dir: &Path, id: &str) -> EpisodeCacheState {
-    // nothing is written under a name the cache would not write, so nothing is cached
-    // under one either
     if !names_one_entry(id) {
         return EpisodeCacheState::NotCached;
     }
@@ -90,9 +61,6 @@ pub fn state_of(dir: &Path, id: &str) -> EpisodeCacheState {
     }
 }
 
-/// Every episode the cache directory holds, keyed by identifier.
-///
-/// A cache directory that does not exist yet is empty, not an error.
 pub fn list(dir: &Path) -> BTreeMap<String, EpisodeCacheState> {
     let mut entries = BTreeMap::new();
     let Ok(read_dir) = std::fs::read_dir(dir) else {
@@ -109,16 +77,13 @@ pub fn list(dir: &Path) -> BTreeMap<String, EpisodeCacheState> {
         else {
             continue;
         };
-        // resolved from the directory rather than this entry, so a part file never masks
-        // the complete file beside it
+
         entries.insert(id.to_owned(), state_of(dir, id));
     }
 
     entries
 }
 
-/// The cache's total size, counting complete files and part files. A cache directory that
-/// does not exist yet is zero, not an error.
 pub fn total_size(dir: &Path) -> u64 {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return 0;
@@ -136,11 +101,6 @@ pub fn total_size(dir: &Path) -> u64 {
         .sum()
 }
 
-/// Removes an episode's complete file and any part file, returning the bytes reclaimed.
-///
-/// Removing an episode that is not cached succeeds with nothing reclaimed. The caller
-/// cancels an in-progress download first, and refuses to evict a file currently playing;
-/// [`crate::download::DownloadManager::evict`] does both.
 pub fn evict(dir: &Path, id: &str) -> Result<u64> {
     if !names_one_entry(id) {
         return Err(Error::Internal(format!("{id} does not name a cache entry")));
@@ -159,10 +119,6 @@ pub fn evict(dir: &Path, id: &str) -> Result<u64> {
     Ok(reclaimed)
 }
 
-/// Bytes available on the filesystem holding `dir`.
-///
-/// `dir` need not exist yet: the nearest existing ancestor is measured instead, since that
-/// is the filesystem the directory would be created on.
 pub fn free_space(dir: &Path) -> Result<u64> {
     use std::os::unix::ffi::OsStrExt;
 
@@ -186,7 +142,6 @@ pub fn free_space(dir: &Path) -> Result<u64> {
     // SAFETY: statvfs returned 0, so it initialised the struct
     let stat = unsafe { stat.assume_init() };
 
-    // the two field widths differ between macOS and Linux, so widen rather than cast
     Ok(widen(stat.f_bavail).saturating_mul(widen(stat.f_frsize)))
 }
 
@@ -240,7 +195,7 @@ mod tests {
         write(&audio_path(root.path(), "two"), 20);
         write(&audio_path(root.path(), "three"), 30);
         write(&part_path(root.path(), "four"), 5);
-        // an unrelated file the cache does not own
+
         write(&root.path().join("catalog.json"), 999);
 
         assert_eq!(total_size(root.path()), 65);
@@ -291,7 +246,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let cache = root.path().join("audio");
         std::fs::create_dir_all(&cache).unwrap();
-        // what an escape would reach, sitting where the join would land
+
         let outside = root.path().join("escape.mp3");
         write(&outside, 64);
 

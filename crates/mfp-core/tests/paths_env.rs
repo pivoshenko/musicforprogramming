@@ -1,11 +1,3 @@
-//! The one test that steers the path resolvers through the process environment.
-//!
-//! It lives in its own integration test file, and so in its own process with a single test.
-//! `std::env::set_var` is unsafe: the write races every thread reading the environment,
-//! including the C code behind DNS, TLS, and log timestamps, and the unit test binary runs
-//! its tests on a thread pool - so the same test there could not justify its own writes.
-
-// An integration test is its own crate, so the library's cfg(test) exemption does not reach it
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,11 +22,9 @@ fn directory_overrides_scope_an_instance_without_disturbing_the_defaults() {
         "XDG_CACHE_HOME",
         "XDG_STATE_HOME",
     ]);
-    // the XDG variables above are taken purely to prove they are ignored: the defaults
-    // below must hold whether or not the caller has them set
 
     let home = PathBuf::from(std::env::var("HOME").expect("HOME names the home directory"));
-    // none of the three roots varies by platform
+
     let config = home.join(".config").join("mfp");
     let cache = home.join(".cache").join("mfp");
     let state = home.join(".local").join("state").join("mfp");
@@ -54,8 +44,6 @@ fn directory_overrides_scope_an_instance_without_disturbing_the_defaults() {
     assert_eq!(state_file().unwrap(), state.join("state.json"));
     assert_eq!(log_file().unwrap(), state.join("daemon.log"));
 
-    // setting an XDG root must NOT move anything: honouring one of these without the
-    // others scatters an instance across several roots
     set_var("XDG_STATE_HOME", "/tmp/xdg-state");
     set_var("XDG_CACHE_HOME", "/tmp/xdg-cache");
     set_var("XDG_CONFIG_HOME", "/tmp/xdg-config");
@@ -66,7 +54,6 @@ fn directory_overrides_scope_an_instance_without_disturbing_the_defaults() {
     );
     assert_eq!(config_dir().unwrap(), config);
 
-    // two instances scoped by MFP_STATE_DIR share neither state file nor cache
     set_var("MFP_STATE_DIR", "/tmp/instance-a/state");
     set_var("MFP_CACHE_DIR", "/tmp/instance-a/cache");
     let (state_a, audio_a) = (state_file().unwrap(), audio_cache_dir().unwrap());
@@ -96,7 +83,6 @@ fn set_var(key: &str, value: &str) {
     unsafe { std::env::set_var(key, value) };
 }
 
-/// Clears the named variables and restores what they held on drop.
 struct TakenVars(Vec<(String, Option<String>)>);
 
 impl TakenVars {

@@ -1,11 +1,3 @@
-//! The frequency spectrum published alongside playback.
-//!
-//! This reproduces Web Audio's `getByteFrequencyData` so a client can run the site's own
-//! analyser arithmetic unchanged: samples are downmixed to mono and Hann-windowed, a
-//! 2048-point transform is taken, the magnitudes are smoothed exponentially against the
-//! previous frame, and each is scaled linearly from [`SPECTRUM_MIN_DB`] to
-//! [`SPECTRUM_MAX_DB`] onto `0..=255`.
-
 use std::sync::Arc;
 
 use mfp_core::protocol::{
@@ -14,28 +6,19 @@ use mfp_core::protocol::{
 use rustfft::num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 
-/// The transform size: Web Audio's default `fftSize`, which is why the published contract
-/// carries [`SPECTRUM_BINS`] - half of it - and why the site's analyser is calibrated
-/// against it.
 pub const FFT_SIZE: usize = SPECTRUM_BINS * 2;
 
-/// What the transform's output is divided by before magnitudes are taken. Web Audio
-/// normalises by `fftSize` and the decibel bounds are calibrated against that, so getting
-/// it wrong shifts every bin.
 const MAGNITUDE_SCALE: f32 = 1.0 / FFT_SIZE as f32;
 
-/// The decibel span the byte range covers.
 const DECIBEL_SPAN: f32 = SPECTRUM_MAX_DB - SPECTRUM_MIN_DB;
 
-/// Turns runs of samples into successive spectra. Stateful because the smoothing is
-/// against the previous frame, so one analyser belongs to one stream of audio.
 pub struct Analyser {
     fft: Arc<dyn Fft<f32>>,
-    /// The Hann window, which never changes
+
     window: Vec<f32>,
-    /// The previous frame's smoothed magnitudes, in linear units
+
     smoothed: Vec<f32>,
-    /// The transform's input and output, reused so a frame allocates nothing
+
     buffer: Vec<Complex<f32>>,
 }
 
@@ -56,9 +39,6 @@ impl Analyser {
         }
     }
 
-    /// Analyses the most recent samples of `samples`, interleaved at `channels` and ordered
-    /// oldest first. Only the last [`FFT_SIZE`] frames are read; a shorter run is zero-padded
-    /// in front, so a stream that has only just started is analysed as the tail it is.
     pub fn analyse(&mut self, samples: &[f32], channels: usize) -> Spectrum {
         self.fill(samples, channels);
         self.fft.process(&mut self.buffer);
@@ -71,17 +51,12 @@ impl Analyser {
             self.smoothed[bin] = smoothed;
             let decibels = 20.0 * smoothed.log10();
             let scaled = 255.0 * (decibels - SPECTRUM_MIN_DB) / DECIBEL_SPAN;
-            // `clamp` yields NaN for a NaN input and `as u8` saturates rather than
-            // wrapping, so an impossible level lands on a bound and never on a wild byte
+
             bytes.push(scaled.clamp(0.0, 255.0) as u8);
         }
         Spectrum(bytes)
     }
 
-    /// Downmixes, windows, and lays the frames out for the transform.
-    ///
-    /// Non-finite samples are read as silence; one carried into the smoothing would poison
-    /// every later frame, reading as the analyser having died rather than as one bad frame.
     fn fill(&mut self, samples: &[f32], channels: usize) {
         let channels = channels.max(1);
         let frames = samples.len() / channels;
@@ -110,10 +85,7 @@ impl Default for Analyser {
 
 #[cfg(test)]
 mod tests {
-    /// What one spectrum frame costs.
-    ///
-    /// The measured baseline, recorded so a regression shows up as a number rather than a
-    /// hunch: 8 us for a 2048-point transform, 0.016% of the analysis thread's 50 ms budget.
+
     #[test]
     #[ignore = "benchmark, run explicitly"]
     fn bench_analyse() {
@@ -137,8 +109,6 @@ mod tests {
 
     use super::*;
 
-    /// A plausible output rate, so the bin a test tone lands in is the one a real stream
-    /// would put it in.
     const SAMPLE_RATE: f32 = 44_100.0;
 
     fn sine(frequency: f32, amplitude: f32, len: usize) -> Vec<f32> {
@@ -150,7 +120,6 @@ mod tests {
             .collect()
     }
 
-    /// A deterministic broadband signal, so every bin carries a level worth comparing.
     fn noise(amplitude: f32, len: usize) -> Vec<f32> {
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
         (0..len)
@@ -164,7 +133,6 @@ mod tests {
             .collect()
     }
 
-    /// Runs enough frames for the exponential smoothing to converge, and returns the last.
     fn settled(analyser: &mut Analyser, samples: &[f32], channels: usize) -> Spectrum {
         let mut spectrum = Spectrum::silent();
         for _ in 0..40 {
@@ -195,9 +163,6 @@ mod tests {
         assert!(spectrum.0.iter().all(|&bin| bin == 0));
     }
 
-    /// The one test that proves the bins are ordered lowest frequency first and that the
-    /// transform is the size the contract claims: a tone placed exactly on bin 100's
-    /// centre frequency has to land there and nowhere else.
     #[test]
     fn a_full_scale_tone_peaks_in_the_bin_its_frequency_belongs_to() {
         const BIN: usize = 100;
@@ -205,7 +170,7 @@ mod tests {
         let spectrum = settled(&mut Analyser::new(), &sine(frequency, 1.0, FFT_SIZE), 1);
 
         assert_eq!(spectrum.0[BIN], 255, "the tone's own bin is not saturated");
-        // Hann's main lobe is four bins wide; everything beyond it is below the floor
+
         for (index, &bin) in spectrum.0.iter().enumerate() {
             if index.abs_diff(BIN) > 4 {
                 assert_eq!(bin, 0, "bin {index} carries {bin} for a tone at bin {BIN}");
@@ -232,9 +197,6 @@ mod tests {
         assert_ne!(low, high);
     }
 
-    /// Every byte a `u8` can hold is in range by construction, so what this actually
-    /// guards is the arithmetic that produces it: an input no signal chain should ever
-    /// carry must land on a bound rather than panic, wrap, or shorten the frame.
     #[test]
     fn every_byte_stays_in_range_for_arbitrary_input() {
         let mut analyser = Analyser::new();
@@ -255,9 +217,6 @@ mod tests {
         }
     }
 
-    /// A non-finite sample is read as silence rather than carried into the smoothing,
-    /// where a single NaN would persist for the rest of the stream and read as the
-    /// analyser having died rather than as one bad frame.
     #[test]
     fn a_non_finite_sample_does_not_leave_the_analyser_stuck() {
         let mut analyser = Analyser::new();

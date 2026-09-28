@@ -1,10 +1,3 @@
-//! Retrieval and parsing of the RSS feed, which is the sole authority on which episodes
-//! exist.
-//!
-//! Every episode corresponds to an `<item>` carrying an `<enclosure>` of type
-//! `audio/mpeg`, and the enclosure URL is the episode's identity. A retrieval failure and
-//! a parse failure are distinguishable, and neither yields a partial list.
-
 use quick_xml::XmlVersion;
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
@@ -13,8 +6,8 @@ use quick_xml::reader::Reader;
 use crate::error::{Error, Result};
 use crate::model::Episode;
 
-/// Fails rather than returning a partial list when the feed is unreachable, returns a
-/// non-success status, or cannot be parsed as RSS.
+/// Fails rather than returning a partial list when the feed is unreachable, answers with
+/// a non-success status, or cannot be parsed.
 pub async fn fetch(client: &reqwest::Client) -> Result<Vec<Episode>> {
     let response = super::request(client, super::FEED_URL)
         .send()
@@ -48,11 +41,8 @@ fn malformed(reason: &str) -> Error {
     ))
 }
 
-/// Parses an RSS document into episodes, keeping only items with an `audio/mpeg`
-/// enclosure and preserving feed order.
+/// Keeps only items carrying an `audio/mpeg` enclosure, preserving feed order.
 pub fn parse(xml: &str) -> Result<Vec<Episode>> {
-    // text is not trimmed by the reader: an entity arrives as its own event, so trimming
-    // each run would silently eat the spaces around it
     let mut reader = Reader::from_str(xml);
 
     let mut episodes = Vec::new();
@@ -80,7 +70,6 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
                 text.clear();
             }
             Event::Empty(empty) => {
-                // enclosure is the only empty tag in the feed carrying data we need
                 if local_name(empty.name().as_ref()) == "enclosure"
                     && let Some(partial) = item.as_mut()
                 {
@@ -88,9 +77,6 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
                     let mut length = None;
                     let mut mime = None;
                     for attribute in empty.attributes().flatten() {
-                        // `value` is the raw attribute text; RSS writes `&` in an
-                        // enclosure URL as `&amp;`, and that URL is both the download
-                        // target and the episode's identity
                         let Ok(value) = attribute.normalized_value(XmlVersion::Implicit1_0) else {
                             continue;
                         };
@@ -124,8 +110,7 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
             Event::End(end) => {
                 let name = local_name(end.name().as_ref()).to_owned();
                 path.pop();
-                // only the direct children of an <item> carry episode data, so text from
-                // the channel-level elements of the same name is ignored
+
                 let in_item = path.last().map(String::as_str) == Some("item");
                 if in_item && let Some(partial) = item.as_mut() {
                     match name.as_str() {
@@ -150,8 +135,7 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
     if !saw_rss {
         return Err(malformed("It has no <rss> or <channel> element"));
     }
-    // an error page rendered as RSS parses, and a catalog built from it would be cached
-    // over the good one for the whole of the cache's lifetime
+
     if episodes.is_empty() {
         return Err(malformed("It lists no episode with an audio enclosure"));
     }
@@ -159,7 +143,6 @@ pub fn parse(xml: &str) -> Result<Vec<Episode>> {
     Ok(episodes)
 }
 
-/// Strips any namespace prefix, so `itunes:duration` reads as `duration`.
 fn local_name(raw: &str) -> &str {
     match raw.rsplit_once(':') {
         Some((_, local)) => local,
@@ -178,9 +161,6 @@ struct PartialItem {
 }
 
 impl PartialItem {
-    /// An item without an `audio/mpeg` enclosure is not an episode and is dropped; every
-    /// other field falls back to a neutral value rather than dropping an episode the feed
-    /// does list.
     fn into_episode(self) -> Option<Episode> {
         Some(Episode {
             title: self.title.unwrap_or_default(),
@@ -200,8 +180,6 @@ impl PartialItem {
     }
 }
 
-/// Parses `itunes:duration`, which the feed writes as `H:MM:SS` but which the format also
-/// permits as `MM:SS` or as whole seconds.
 fn parse_duration(raw: &str) -> Option<u64> {
     let mut total = 0u64;
     for part in raw.trim().split(':') {
@@ -212,13 +190,10 @@ fn parse_duration(raw: &str) -> Option<u64> {
     Some(total)
 }
 
-/// The years a `pubDate` may name.
-///
-/// Anything outside overflows the arithmetic below, which wraps in a release build and
-/// panics in a debug one, and no real feed carries it.
+/// The years a `pubDate` may name. Anything outside overflows the day arithmetic below,
+/// which panics in a debug build and wraps in a release one.
 const PUB_DATE_YEARS: std::ops::RangeInclusive<i64> = 1..=9999;
 
-/// Parses an RFC 2822 `pubDate` into whole seconds since the Unix epoch.
 fn parse_pub_date(raw: &str) -> Option<i64> {
     let rest = match raw.trim().split_once(',') {
         Some((_weekday, rest)) => rest,
@@ -256,10 +231,6 @@ fn month_number(name: &str) -> Option<i64> {
         .map(|index| index as i64 + 1)
 }
 
-/// Seconds east of UTC for a `+HHMM`, `-HHMM`, or named zone.
-///
-/// RFC 5322 section 4.3 gives the North American zone names numeric offsets; everything
-/// else it leaves unknown, which reads as UTC.
 fn zone_offset_secs(zone: &str) -> Option<i64> {
     let (sign, digits) = match zone.split_at_checked(1)? {
         ("+", digits) => (1, digits),
@@ -274,9 +245,6 @@ fn zone_offset_secs(zone: &str) -> Option<i64> {
     Some(sign * (hours * 3_600 + minutes * 60))
 }
 
-/// Days between 1970-01-01 and the given civil date, by Howard Hinnant's algorithm.
-/// Seconds east of UTC for one of the zone names RFC 5322 section 4.3 defines, and zero
-/// for anything else.
 fn named_zone_offset_secs(zone: &str) -> i64 {
     let hours = match zone.to_ascii_uppercase().as_str() {
         "EDT" => -4,
@@ -442,8 +410,6 @@ mod tests {
         assert_eq!(parse(xml).unwrap()[0].title, "A & B B");
     }
 
-    /// A five-digit year overflowed the day arithmetic, which panics a debug build and
-    /// wraps a release one into a date that sorts as nonsense.
     #[test]
     fn a_date_too_far_out_to_compute_is_refused_rather_than_overflowing() {
         assert_eq!(
@@ -458,8 +424,6 @@ mod tests {
         assert_eq!(parse_pub_date("Mon, 01 Jan 2024 99:00:00 GMT"), None);
     }
 
-    /// The item is dropped rather than the whole feed: the enclosure is what makes an
-    /// episode, and a date that will not parse falls back to the epoch.
     #[test]
     fn an_item_whose_date_cannot_be_computed_still_yields_an_episode() {
         let xml = r#"<rss><channel><item>
@@ -483,8 +447,6 @@ mod tests {
         assert!(error.to_string().contains("lists no episode"));
     }
 
-    /// RSS writes `&` in a URL as `&amp;`, and the enclosure URL is both the download
-    /// target and the episode's identity.
     #[test]
     fn an_escaped_enclosure_url_is_decoded() {
         let xml = r#"<rss><channel><item>
@@ -508,7 +470,7 @@ mod tests {
             parse_pub_date("Tue, 22 Feb 2011 09:17:58 PST"),
             parse_pub_date("Tue, 22 Feb 2011 17:17:58 GMT")
         );
-        // an unknown name stays UTC, which is what an unknown zone means
+
         assert_eq!(
             parse_pub_date("Tue, 22 Feb 2011 17:17:58 XYZ"),
             parse_pub_date("Tue, 22 Feb 2011 17:17:58 GMT")

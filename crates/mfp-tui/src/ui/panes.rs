@@ -1,10 +1,3 @@
-//! The four things drawn inside the frame: the catalog, the player, the analyser, and the
-//! track listing.
-//!
-//! Every function here is a pure draw from [`App`] and a rectangle, mutating state only to
-//! keep a scroll offset in step with a selection: a pane that decided anything would be a
-//! second place the interface's behaviour lived.
-
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -17,37 +10,21 @@ use super::anim;
 use super::app::{App, Focus, Local, TrackLine, UNKNOWN_DURATION, hms, name_of, number_of};
 use super::theme::{SPECTRUM_STEPS, Theme};
 
-/// The mark on the row the cursor is on. The only thing the mark column ever holds, so
-/// the cursor sits hard against the episode number whatever else the row is.
 const CURSOR: &str = ">";
 
 const FAVOURITE: char = '*';
 
-/// A complete local copy.
 const CACHED: char = 'v';
 
-/// A transfer that failed.
 const FAILED: char = '!';
 
-/// The resting analyser's baseline. A hyphen rather than a block: the gaps between the
-/// glyphs read as a dashed rule, where a solid bar reads as a level the analyser is
-/// holding.
 const FLATLINE: char = '-';
 
-/// The body immediately under the analyser's trace, and the body below that. ASCII in grey
-/// rather than blocks: the gaps keep the fill reading as texture behind the trace, where a
-/// solid column reads as a bar chart.
 const FILL_NEAR: char = ':';
 const FILL_FAR: char = '.';
 
-/// How many rows under the mark take [`FILL_NEAR`]. Small, so the dense band tracks the
-/// trace closely enough to move with it.
 const FILL_HALO: usize = 2;
 
-/// A bordered pane, brightened on the border when it holds focus.
-///
-/// The title does not take the border's colour: a border is chrome and a title is a label,
-/// and the two on one accent made the focused pane read as a solid bracket.
 pub fn pane<'a>(title: impl Into<Line<'a>>, focused: bool, theme: &Theme) -> Block<'a> {
     let edge = if focused { theme.accent } else { theme.line };
     let label = theme.title;
@@ -60,9 +37,6 @@ pub fn pane<'a>(title: impl Into<Line<'a>>, focused: bool, theme: &Theme) -> Blo
         .style(Style::default().bg(theme.bg))
 }
 
-// == Catalog ==
-
-/// The episode list, with the number, the name, the markers, and the duration.
 pub fn catalog(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Catalog;
 
@@ -101,7 +75,6 @@ pub fn catalog(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     app.catalog_height = height;
     app.catalog_offset = keep_visible(app.catalog_offset, app.selected, height, app.matches.len());
 
-    // Nothing below this writes to `app`, so the theme is borrowed rather than cloned out
     let app: &App = app;
     let theme = app.theme();
     let loaded = app.loaded_id().map(str::to_owned);
@@ -112,9 +85,6 @@ pub fn catalog(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         .take(height)
         .enumerate()
         .filter_map(|(row, index)| {
-            // `matches` indexes `catalog.episodes` and `refilter` rebuilds it whenever the
-            // catalog is replaced, so this always finds one - but a draw is the wrong place
-            // to discover otherwise
             let episode = app.catalog.episodes.get(*index)?;
             let id = episode.id();
             let on_cursor = app.catalog_offset + row == app.selected;
@@ -141,8 +111,6 @@ pub fn catalog(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     );
 }
 
-/// One episode row, laid out so the name column is the only one that flexes and titles
-/// therefore never shift horizontally as the list scrolls.
 #[allow(clippy::too_many_arguments)]
 fn catalog_row<'a>(
     theme: &Theme,
@@ -156,13 +124,9 @@ fn catalog_row<'a>(
     loaded: bool,
     focused: bool,
 ) -> Line<'a> {
-    // mark(2) number(3) gap(1) name(flex) gap(1) fav(1) local(1) gap(1) duration(8)
     const FIXED: usize = 2 + 3 + 1 + 1 + 1 + 1 + 1 + 8;
     let name_width = width.saturating_sub(FIXED).max(1);
 
-    // The cursor alone, never a second glyph beside it: the loaded episode says so in the
-    // colour and weight of its own name, which costs no column and so cannot shift the
-    // rows around it
     let (mark, mark_colour) = match on_cursor {
         true if loaded => (CURSOR, theme.playing),
         true => (CURSOR, theme.accent),
@@ -176,9 +140,6 @@ fn catalog_row<'a>(
         style = style.add_modifier(Modifier::BOLD);
     }
 
-    // Carried by the whole line rather than the name alone, so the highlight runs the
-    // width of the row: a band that stops before the duration reads as the name being
-    // selected rather than the episode
     let row = match on_cursor && focused {
         true => Style::default().bg(theme.line),
         false => Style::default(),
@@ -228,9 +189,6 @@ fn catalog_row<'a>(
     .style(row)
 }
 
-/// Slides a window so that `selected` is inside it, moving by the least it can.
-///
-/// Returned rather than clamped in place so the same rule serves both scrollable panes.
 pub fn keep_visible(offset: usize, selected: usize, height: usize, total: usize) -> usize {
     if height == 0 || total == 0 {
         return 0;
@@ -246,12 +204,6 @@ pub fn keep_visible(offset: usize, selected: usize, height: usize, total: usize)
     }
 }
 
-// == Player ==
-
-/// The loaded episode, what it is doing, where in it playback is, and the spectrum of it.
-///
-/// One pane rather than two: the analyser is a picture of this episode and nothing else, and a
-/// border between them made the interface read as four regions where it has three.
 pub fn player(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let theme = app.theme();
     let block = pane(" // Player ", false, theme);
@@ -295,14 +247,7 @@ pub fn player(frame: &mut Frame<'_>, area: Rect, app: &App) {
     analyser(frame, spectrum, app);
 }
 
-/// The episode on the left, marquee'd when it does not fit, then the clock and what playback
-/// is doing, hard against the right edge.
-///
-/// One row rather than three: the title, the position, and the state are what a glance at the
-/// player asks for together, and on separate rows each of them read as a line saying one word.
 fn header_spans<'a>(app: &App, theme: &'a Theme, title: &str, width: usize) -> Vec<Span<'a>> {
-    /// The least space between the title and the clock, so a title filling the row cannot
-    /// run into it.
     const GAP: usize = 2;
 
     let (word, colour) = state_word(app, theme);
@@ -335,7 +280,6 @@ fn header_spans<'a>(app: &App, theme: &'a Theme, title: &str, width: usize) -> V
     spans
 }
 
-/// The rule between two parts of a line.
 fn separator(theme: &Theme) -> Span<'static> {
     Span::styled(" \u{b7} ".to_string(), Style::default().fg(theme.line))
 }
@@ -348,12 +292,11 @@ fn state_word(app: &App, theme: &Theme) -> (&'static str, Color) {
         PlaybackState::Seeking => ("Seeking", theme.warn),
         PlaybackState::Stopped => ("Stopped", theme.faint),
         PlaybackState::Error => ("Error", theme.err),
-        // a state only a newer daemon knows, named rather than guessed at
+
         _ => ("Unknown", theme.faint),
     }
 }
 
-/// `v Downloaded . 400 MB . * Favourite`, each part omitted when it says nothing.
 fn status_spans<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
     let mut spans: Vec<Span<'a>> = Vec::new();
 
@@ -363,9 +306,6 @@ fn status_spans<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
         }
     };
 
-    // Only a local copy is worth a word: streaming is the default every episode starts in,
-    // and saying so on every row of the status line said nothing. Marked with the list's
-    // own glyph so it means a complete local copy wherever it appears
     if app.snapshot.source == Some(Source::Local) {
         separate(&mut spans);
         spans.push(Span::styled(
@@ -395,10 +335,6 @@ fn status_spans<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
     spans
 }
 
-/// `38:19 / ~4:00:00`, the seek target standing in for the position while one is in flight.
-///
-/// A `~` marks a total the feed only estimates, rather than the word `approx`: it sits on the
-/// number it qualifies, which is what a clock sharing its row with the title has room for.
 fn time_spans<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
     let total = app
         .snapshot
@@ -430,16 +366,6 @@ fn time_spans<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
     ]
 }
 
-/// The spectrum, as one mark per column over a filled body, drawn into `inner` inside the
-/// player's pane.
-///
-/// The mark carries the column's height, as the site draws it, so the eye follows a line of
-/// marks as a moving waveform. The rows beneath it are filled with grey ASCII that thins
-/// with depth: the trace alone left most of the pane empty, and a body densest just under
-/// the mark moves with it instead of sitting there as a wall.
-///
-/// Draws a flat baseline rather than nothing when there is no spectrum: a blank region
-/// reads as a broken component, and a floor reads as silence.
 fn analyser(frame: &mut Frame<'_>, inner: Rect, app: &App) {
     let theme = app.theme();
 
@@ -470,9 +396,6 @@ fn analyser(frame: &mut Frame<'_>, inner: Rect, app: &App) {
         let steps = anim::MARK_STEPS;
         let reached = (f64::from(*magnitude) * (height * steps) as f64).round() as usize;
 
-        // A column reading nothing still draws its baseline mark, so the trace runs the
-        // full width of the pane. The top of the band is quiet in this catalog, and a
-        // blank right-hand third reads as a pane that stops early rather than as silence
         let (from_bottom, within) = match reached {
             0 => (0, 0),
             _ => (
@@ -483,10 +406,6 @@ fn analyser(frame: &mut Frame<'_>, inner: Rect, app: &App) {
 
         let x = inner.x + column as u16;
 
-        // The rows under the mark, so a quiet frame reads as a low band rather than as a
-        // pane with a thread across it. Thinning with depth rather than filled flat: the
-        // dense rows hug the mark and move with it, where one glyph all the way down held
-        // still under a trace that did not
         for row in 0..from_bottom {
             let y = inner.y + (height - 1 - row) as u16;
             if let Some(cell) = buffer.cell_mut((x, y)) {
@@ -508,9 +427,6 @@ fn analyser(frame: &mut Frame<'_>, inner: Rect, app: &App) {
     }
 }
 
-// == Tracks ==
-
-/// The selected episode's track listing, or its description when it has no listing.
 pub fn tracks(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Tracks;
 
@@ -534,7 +450,6 @@ pub fn tracks(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let max_offset = body.len().saturating_sub(height);
     app.tracks_offset = app.tracks_offset.min(max_offset);
 
-    // Nothing below this writes to `app`, so the theme is borrowed rather than cloned out
     let app: &App = app;
     let theme = app.theme();
     let width = inner.width as usize;
@@ -543,8 +458,6 @@ pub fn tracks(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         .enumerate()
         .skip(app.tracks_offset)
         .take(height)
-        // The number is the row's index because every numbered line comes before every other
-        // kind, which is what `track_lines` builds
         .map(|(index, line)| match line {
             TrackLine::Numbered(text) => Line::from(vec![
                 Span::styled(
@@ -570,13 +483,7 @@ pub fn tracks(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     );
 }
 
-/// Splits the right-hand column into the player, the analyser, and the tracks.
-///
-/// The analyser takes what is left after the other two have what they need, up to nine
-/// rows: beyond that it crowds out the track listing, which is the pane one actually
-/// reads. On a column too short for all three it takes whatever remains, down to nothing.
 pub fn split_right(area: Rect) -> [Rect; 2] {
-    /// Two rows of text, two of border, and the analyser's own minimum.
     const PLAYER_MIN: u16 = 5;
     const TRACKS_MIN: u16 = 5;
     const ANALYSER_MAX: u16 = 9;

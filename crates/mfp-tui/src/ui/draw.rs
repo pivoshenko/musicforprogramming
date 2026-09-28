@@ -1,6 +1,3 @@
-//! The frame: how the panes are arranged, and the header, footer, and help overlay that
-//! surround them.
-
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -12,11 +9,8 @@ use super::app::{App, Mode};
 use super::panes;
 use super::theme::Theme;
 
-/// Below this the two-column layout is dropped for a single column.
 const NARROW: u16 = 76;
 
-/// Below either of these there is nothing worth drawing, and the interface says so rather
-/// than drawing a mangled frame.
 const MIN_WIDTH: u16 = 36;
 const MIN_HEIGHT: u16 = 12;
 
@@ -45,16 +39,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     footer(frame, foot, app, app.theme());
 
     if area.width < NARROW {
-        // One column: the player and the analyser above the catalog. The track listing is
-        // the pane that goes, because it is the one that needs width to be readable
         let [player, catalog] = panes::split_right(body);
         panes::player(frame, player, app);
         panes::catalog(frame, catalog, app);
     } else {
-        // A column of gap between the two, so the panes' borders never run as a doubled
-        // vertical rule
-        // Widened to `u32` first: `body.width` is whatever the terminal reports, and past
-        // 1638 columns the multiply alone overflows `u16`
         let catalog_width = (u32::from(body.width) * 40 / 100).clamp(30, 52) as u16;
         let [left, _, right] = Layout::horizontal([
             Constraint::Length(catalog_width),
@@ -109,8 +97,6 @@ fn header(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
         ));
     }
 
-    // Beside the unreachable marker rather than on the footer, so a refusal is still seen
-    // without the key legend going away to show it
     if let Some(status) = &app.status {
         left.push(Span::styled(
             format!("  {}", status.text),
@@ -118,9 +104,6 @@ fn header(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
         ));
     }
 
-    // After the two markers worth interrupting for, and unbolded: an update is worth
-    // mentioning for as long as it is available, not worth pulling the eye off a playing
-    // episode every frame
     if let Some(latest) = &app.update {
         left.push(Span::styled(
             format!("  update {latest} available"),
@@ -128,8 +111,6 @@ fn header(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
         ));
     }
 
-    // Appended after the markers so they keep their room on a narrow terminal and the
-    // masthead is what gives way
     let used: usize = left.iter().map(|span| span.content.chars().count()).sum();
     left.extend(tagline(theme, (area.width as usize).saturating_sub(used)));
 
@@ -139,15 +120,10 @@ fn header(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     );
 }
 
-/// The site's tagline, beside the site name, dropped whole when the header is too narrow
-/// to hold it.
-///
-/// The header is one row, so rather than clip mid-word the tagline goes entirely.
 fn tagline(theme: &Theme, room: usize) -> Vec<Span<'static>> {
     const SENTENCE: &str = "A series of mixes intended for listening while programming to focus the brain and \
          inspire the mind.";
 
-    // Three cells of gap, so the tagline is never flush against the site name
     const GAP: &str = "   ";
     if GAP.len() + SENTENCE.chars().count() > room {
         return Vec::new();
@@ -159,11 +135,6 @@ fn tagline(theme: &Theme, room: usize) -> Vec<Span<'static>> {
     ]
 }
 
-/// The key legend, replaced by the search line while a search is running.
-///
-/// Nothing else ever takes this row: it is the one place the bindings are always
-/// readable, and a message that borrows it takes them away to say something the screen
-/// has usually already shown.
 fn footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     if app.mode == Mode::Search {
         frame.render_widget(
@@ -223,8 +194,6 @@ fn footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     );
 }
 
-// == Help ==
-
 fn help(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     let bindings: &[(&str, &str)] = &[
         ("j / k / arrows", "Move the cursor"),
@@ -248,7 +217,7 @@ fn help(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     ];
 
     let width = 64u16.min(area.width.saturating_sub(4));
-    // Two rows of trailer plus two of border
+
     let height = (bindings.len() as u16 + 4).min(area.height.saturating_sub(2));
     let popup = centre(area, width, height);
 
@@ -280,7 +249,6 @@ fn help(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     );
 }
 
-/// A rectangle of this size in the middle of `area`, clamped to fit.
 fn centre(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);

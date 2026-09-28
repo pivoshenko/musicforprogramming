@@ -1,12 +1,3 @@
-//! Everything the interface knows, and every rule for changing it.
-//!
-//! The interface holds no authoritative playback state: `snapshot` is the last thing the
-//! daemon said and is never edited locally, so a keypress sends a command and waits for the
-//! daemon to report the consequence rather than drawing what was asked for.
-//!
-//! Selection, focus, scroll, and filter are the interface's own, because no other client
-//! has an opinion about them.
-
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -15,19 +6,12 @@ use mfp_core::protocol::{DownloadProgress, DownloadState, PlaybackState, StateSn
 
 use super::theme::{PALETTE, Theme};
 
-/// How long an action's confirmation stays on the footer.
 const STATUS_LINGER: Duration = Duration::from_millis(2200);
 
-/// Rows a page key moves before any pane has drawn and reported its real height.
 const DEFAULT_PAGE: usize = 8;
 
-/// What the tracks pane shows for an episode with neither a listing nor a description.
 const NO_TRACKLIST: &str = "No track listing for this episode";
 
-/// Which pane the list keys act on.
-///
-/// The player is drawn but never focused: its controls are global keys that work whatever
-/// is focused, so giving it a focus state would only create one in which `j` does nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Catalog,
@@ -50,7 +34,6 @@ impl Focus {
     }
 }
 
-/// What typing does right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
@@ -58,22 +41,15 @@ pub enum Mode {
     Help,
 }
 
-/// What an episode's local copy is doing, collapsed from the cache scan and the snapshot
-/// into the one thing a row has to draw.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Local {
     None,
-    /// A transfer accepted but not yet finished, and how far along it is.
+
     Downloading(f64),
     Cached,
     Failed,
 }
 
-/// A failure worth telling the user about, carried in the header until it expires.
-///
-/// Only failures. An action that worked says so by changing what is on screen, and a
-/// footer that flickers between a confirmation and the key legend costs the legend more
-/// than the confirmation was worth.
 #[derive(Debug, Clone)]
 pub struct Status {
     pub text: String,
@@ -85,37 +61,29 @@ pub struct App {
     pub snapshot: StateSnapshot,
     pub focus: Focus,
     pub mode: Mode,
-    /// The live search query. Empty means unfiltered, which is not the same as inactive:
-    /// the mode says whether keys are being captured.
+
     pub query: String,
-    /// Indices into `catalog.episodes` that match `query`, in catalog order.
+
     pub matches: Vec<usize>,
-    /// Index into `matches`, not into the catalog.
+
     pub selected: usize,
-    /// The first visible row of the catalog pane, kept so the selection stays on screen
-    /// across resizes without the list jumping.
+
     pub catalog_offset: usize,
     pub tracks_offset: usize,
-    /// Rows each pane had the last time it drew, so a page key can move by a page.
-    ///
-    /// Written by the panes as they lay themselves out: the height is theirs and changes on
-    /// every resize. The starting value only serves a key pressed before the first frame.
+
     pub catalog_height: usize,
     pub tracks_height: usize,
-    /// Episodes with a complete file in the audio cache, by identifier.
+
     pub cached: BTreeSet<String>,
-    /// Frames since launch, at [`super::anim::TICK_MS`]. Drives every moving thing.
+
     pub tick: u64,
     pub status: Option<Status>,
-    /// The version a newer release carries, when the last version check found one. Not a
-    /// [`Status`]: it is not a failure, and it never expires - an update stays available.
+
     pub update: Option<String>,
-    /// Set when the daemon stops answering, so the interface can say so rather than
-    /// silently drawing a frozen snapshot.
+
     pub disconnected: bool,
     pub quit: bool,
-    /// The episode selected when search began, so cancelling can restore it even though
-    /// filtering changed every index.
+
     restore: Option<String>,
 }
 
@@ -150,15 +118,11 @@ impl App {
         &PALETTE
     }
 
-    // == Reading state ==
-
-    /// The episode the cursor is on.
     pub fn selection(&self) -> Option<&Episode> {
         let index = *self.matches.get(self.selected)?;
         self.catalog.episodes.get(index)
     }
 
-    /// The identifier of the episode the daemon has loaded, whatever it is doing with it.
     pub fn loaded_id(&self) -> Option<&str> {
         self.snapshot.episode.as_ref().map(|ep| ep.slug.as_str())
     }
@@ -174,11 +138,6 @@ impl App {
             .find(|download| download.slug == id)
     }
 
-    /// What to draw in an episode row's local-copy column.
-    ///
-    /// The cache scan and the snapshot disagree in one direction only: a file on disk is
-    /// cached whatever the snapshot says, because a transfer from an earlier session leaves
-    /// no entry in this one's snapshot.
     pub fn local(&self, id: &str) -> Local {
         if self.cached.contains(id) {
             return Local::Cached;
@@ -197,18 +156,13 @@ impl App {
                 DownloadState::Completed => Local::Cached,
                 DownloadState::Failed => Local::Failed,
                 DownloadState::Cancelled => Local::None,
-                // a state only a newer daemon knows says nothing about a local copy
+
                 _ => Local::None,
             },
             None => Local::None,
         }
     }
 
-    /// The selected episode's track listing, or its description when it has none, followed by
-    /// the episode's own links, and which of the two the listing is.
-    ///
-    /// The state layer owns this rather than the pane because scrolling needs the line count
-    /// before the pane has been laid out.
     pub fn track_lines(&self) -> (&'static str, Vec<TrackLine>) {
         let Some(episode) = self.selection() else {
             return ("Tracks", Vec::new());
@@ -241,10 +195,6 @@ impl App {
         (heading, lines)
     }
 
-    /// How many lines [`Self::track_lines`] would return, without building them.
-    ///
-    /// Scrolling needs the count on every keypress, the lines only when something draws, and
-    /// the listing is a few hundred owned strings.
     pub fn track_line_count(&self) -> usize {
         let Some(episode) = self.selection() else {
             return 0;
@@ -266,8 +216,6 @@ impl App {
         listing + link_lines(episode).len()
     }
 
-    /// Moves the track listing, never past its last line. The pane clamps again once it
-    /// knows its own height, since that is the bound that changes on a resize.
     pub fn scroll_tracks(&mut self, delta: isize) {
         let last = self.track_line_count().saturating_sub(1);
         self.tracks_offset = self.tracks_offset.saturating_add_signed(delta).min(last);
@@ -277,8 +225,6 @@ impl App {
         self.tracks_offset = self.track_line_count().saturating_sub(1);
     }
 
-    /// Rows the focused pane last drew, which is what a page key moves by. Never zero, so
-    /// a page key on a pane too short to show a row still moves the cursor.
     pub fn page(&self) -> isize {
         let height = match self.focus {
             Focus::Catalog => self.catalog_height,
@@ -287,12 +233,6 @@ impl App {
         height.clamp(1, isize::MAX as usize) as isize
     }
 
-    /// Whether anything on screen is moving, which decides between ticking at twenty frames
-    /// a second and sitting entirely still.
-    ///
-    /// A paused interface redraws on input and daemon events and otherwise not at all. A
-    /// standing status message is deliberately not counted: it does not animate, and its
-    /// expiry is noticed by the loop's own poll rather than by a tick.
     pub fn animating(&self) -> bool {
         matches!(
             self.snapshot.playback,
@@ -305,8 +245,6 @@ impl App {
         })
     }
 
-    /// The position to draw, which is never past the total and never the target of a seek
-    /// the daemon has not confirmed.
     pub fn display_position(&self) -> Option<f64> {
         if self.snapshot.seek_target_secs.is_some() {
             return None;
@@ -318,8 +256,6 @@ impl App {
         })
     }
 
-    // == Changing state ==
-
     pub fn complain(&mut self, text: impl Into<String>) {
         self.status = Some(Status {
             text: text.into(),
@@ -327,8 +263,6 @@ impl App {
         });
     }
 
-    /// Drops an expired status. Returns whether anything changed, so the caller only
-    /// redraws when it did.
     pub fn expire_status(&mut self) -> bool {
         match &self.status {
             Some(status) if status.at.elapsed() >= STATUS_LINGER => {
@@ -339,10 +273,6 @@ impl App {
         }
     }
 
-    /// Re-reads which episodes have a complete file on disk.
-    ///
-    /// Called at startup and after any command that could have changed it, not every frame:
-    /// it is a directory listing, and the answer changes a handful of times per session.
     pub fn rescan_cache(&mut self) {
         self.cached = scan_cache();
     }
@@ -366,8 +296,6 @@ impl App {
         self.tracks_offset = 0;
     }
 
-    /// Puts the cursor on the episode with this identifier if it is in the current match
-    /// set. False when it is filtered out.
     pub fn select_id(&mut self, id: &str) -> bool {
         let found = self.matches.iter().position(|index| {
             self.catalog
@@ -385,14 +313,11 @@ impl App {
         }
     }
 
-    /// Puts the cursor on whatever the daemon has loaded, if anything.
     pub fn select_loaded(&mut self) {
         if let Some(id) = self.loaded_id().map(str::to_owned) {
             self.select_id(&id);
         }
     }
-
-    // == Search ==
 
     pub fn begin_search(&mut self) {
         self.restore = self.selection().map(|episode| episode.id().into_owned());
@@ -401,13 +326,11 @@ impl App {
         self.refilter();
     }
 
-    /// Leaves search with the filter standing, so the narrowed list can be navigated.
     pub fn accept_search(&mut self) {
         self.restore = None;
         self.mode = Mode::Normal;
     }
 
-    /// Leaves search, clears the filter, and puts the cursor back where it was.
     pub fn cancel_search(&mut self) {
         self.query.clear();
         self.mode = Mode::Normal;
@@ -432,11 +355,9 @@ impl App {
         self.refilter();
     }
 
-    /// Deletes the last word, with any spaces before it, as `ctrl-w` does in a shell.
     pub fn pop_query_word(&mut self) {
         let trimmed = self.query.trim_end();
-        // By character rather than by byte: `truncate` panics on an index that is not a
-        // character boundary, and a non-breaking space is three bytes wide
+
         let cut = trimmed
             .char_indices()
             .rev()
@@ -446,8 +367,6 @@ impl App {
         self.refilter();
     }
 
-    /// Rebuilds the match set, keeping the cursor on the same episode where that episode
-    /// still matches and putting it at the top where it does not.
     pub fn refilter(&mut self) {
         let was = self.selection().map(|episode| episode.id().into_owned());
         let needle = self.query.to_lowercase();
@@ -469,10 +388,6 @@ impl App {
     }
 }
 
-/// Whether an episode matches a lowercased query, over its title and its track listing.
-///
-/// The track listing is what makes this worth having: the catalog is 79 episodes with
-/// near-identical titles, and what a listener remembers is an artist on one of them.
 fn matches(episode: &Episode, needle: &str) -> bool {
     episode.site_title().to_lowercase().contains(needle)
         || episode
@@ -481,10 +396,6 @@ fn matches(episode: &Episode, needle: &str) -> bool {
             .is_some_and(|tracks| tracks.to_lowercase().contains(needle))
 }
 
-/// Every episode identifier with a complete `.mp3` in the audio cache.
-///
-/// Read from the directory rather than from the snapshot because the snapshot lists this
-/// session's transfers only, and an episode downloaded last week must still show as local.
 fn scan_cache() -> BTreeSet<String> {
     let Ok(dir) = mfp_core::paths::audio_cache_dir() else {
         return BTreeSet::new();
@@ -502,9 +413,6 @@ fn scan_cache() -> BTreeSet<String> {
         .collect()
 }
 
-// == Formatting ==
-
-/// `H:MM:SS`, or `MM:SS` under an hour. The one place a duration becomes text.
 pub fn hms(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
         return "--:--".into();
@@ -518,10 +426,8 @@ pub fn hms(seconds: f64) -> String {
     }
 }
 
-/// The placeholder drawn where a duration is not known, which is never `0:00:00`.
 pub const UNKNOWN_DURATION: &str = "--:--";
 
-/// The episode's catalog number, as the site writes it: `79` out of `79: Corticyte`.
 pub fn number_of(episode: &Episode) -> &str {
     let title = episode.site_title();
     match title.split_once(':') {
@@ -530,7 +436,6 @@ pub fn number_of(episode: &Episode) -> &str {
     }
 }
 
-/// The episode's name without its catalog number: `Corticyte` out of `79: Corticyte`.
 pub fn name_of(episode: &Episode) -> &str {
     let title = episode.site_title();
     match title.split_once(':') {
@@ -539,27 +444,15 @@ pub fn name_of(episode: &Episode) -> &str {
     }
 }
 
-/// One row of the tracks pane.
-///
-/// The pane draws each kind differently, and the state layer decides which a row is, so the
-/// two cannot disagree about what a row means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrackLine {
-    /// A track, or a line of the description standing in for one. Numbered by the pane, which
-    /// relies on these all coming before any other kind.
     Numbered(String),
-    /// A spacer between the listing and the links below it.
+
     Blank,
-    /// One of the episode's links, as the site gives it.
+
     Link(String),
 }
 
-/// The episode's own links - the artist's SoundCloud, Bandcamp, or homepage as the site lists
-/// them under the player - as the rows that close the tracks pane.
-///
-/// Appended to the listing rather than given a pane of their own: an episode has one or two,
-/// and a fourth pane that is empty for the episodes with none costs more room than it repays.
-/// A blank row rather than a label introduces them: a URL is already unmistakably a link.
 fn link_lines(episode: &Episode) -> Vec<TrackLine> {
     let Some(links) = episode.links.as_deref() else {
         return Vec::new();
@@ -958,8 +851,6 @@ mod tests {
         assert_eq!(app.matches.len(), 3);
     }
 
-    /// `String::truncate` panics on an index that is not a character boundary, and the
-    /// separator a query is cut at need not be one byte wide.
     #[test]
     fn deleting_a_word_across_a_multibyte_space_is_not_a_panic() {
         let mut app = app();

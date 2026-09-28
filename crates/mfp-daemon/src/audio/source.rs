@@ -1,9 +1,3 @@
-//! Building a decodable byte source for an episode.
-//!
-//! Streaming and local playback differ only in where the bytes come from, so both are built
-//! behind one interface and the decoder pipeline downstream is identical. A complete
-//! verified local file is always preferred; a `.part` file is never a playback source.
-
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
@@ -18,39 +12,21 @@ use stream_download::{Settings, StreamDownload};
 
 use super::spectrum::FFT_SIZE;
 
-/// How much of the enclosure to buffer before the decoder is handed the reader: enough for
-/// it to recognise the format and start producing audio, small enough that a 441 MB episode
-/// is still audible in about half a second.
 const PREFETCH_BYTES: u64 = 64 * 1024;
 
-/// How long a transfer may receive nothing before it is reconnected from the last
-/// received offset. `stream-download` performs the resume itself.
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A byte source the decoder can consume: the range-backed reader from `stream-download`,
-/// or a plain `File` for a complete local copy.
 pub trait SeekableRead: Read + Seek + Send + Sync {}
 
 impl<T: Read + Seek + Send + Sync> SeekableRead for T {}
 
-/// An opened source together with what a state snapshot must report about it.
 pub struct OpenSource {
     pub reader: Box<dyn SeekableRead>,
     pub kind: Source,
-    /// False when the upstream host answered a range request with the full resource
-    /// instead of partial content. The source then degrades to sequential streaming and
-    /// seeking is reported unsupported rather than blocking or silently doing nothing.
+
     pub seekable: bool,
 }
 
-/// Opens the episode's audio, using `local_path` when it names a complete verified copy
-/// and streaming from the enclosure URL otherwise.
-///
-/// Called from the audio thread, which is not async, so it drives the streamed reader
-/// through `runtime` rather than awaiting.
-///
-/// `range_support` is what an earlier open of the same enclosure learned; passing it skips
-/// the probe, a whole request whose answer cannot change under a session.
 pub fn open(
     runtime: &tokio::runtime::Handle,
     episode: &Episode,
@@ -70,8 +46,6 @@ pub fn open(
     open_streamed(runtime, episode, range_support)
 }
 
-/// Opens a local copy, rejecting anything whose length disagrees with the feed: a truncated
-/// or half-written file must not be played as though it were the whole episode.
 fn open_local(episode: &Episode, path: &Path) -> Result<OpenSource> {
     let file = File::open(path)?;
     let len = file.metadata()?.len();
@@ -85,7 +59,7 @@ fn open_local(episode: &Episode, path: &Path) -> Result<OpenSource> {
     Ok(OpenSource {
         reader: Box::new(BufReader::new(file)),
         kind: Source::Local,
-        // A file on disk always seeks, and does so without touching the network
+
         seekable: true,
     })
 }
@@ -118,17 +92,6 @@ fn open_streamed(
     })
 }
 
-/// Asks the host whether it serves ranges, and reports what it said.
-///
-/// `stream-download` reads `Accept-Ranges` but keeps the answer to itself, and a source
-/// that cannot seek has to be reported as such rather than discovered by a seek that
-/// stalls waiting for the transfer to catch up.
-///
-/// `HEAD` rather than `GET`, because a host that ignores the range header answers a `GET`
-/// by beginning to send the whole 441 MB enclosure - and that is the very case this
-/// exists to detect, so it is the case that would pay most. A `HEAD` carries no body to
-/// abandon. Both answers count: a host may reply `206` to the range, or `200` with
-/// `Accept-Ranges: bytes`, and either means a later range request will be honoured.
 fn honours_range_requests(runtime: &tokio::runtime::Handle, url: &reqwest::Url) -> bool {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     let client = CLIENT.get_or_init(|| {
@@ -159,29 +122,18 @@ fn honours_range_requests(runtime: &tokio::runtime::Handle, url: &reqwest::Url) 
     })
 }
 
-// == Sample Tap ==
-
-/// How many interleaved samples the tap keeps: one full transform at up to eight channels,
-/// so the analyser has a complete window whatever the decoder's channel layout turns out
-/// to be.
 const TAP_CAPACITY: usize = FFT_SIZE * 8;
 
-/// The most recent samples pulled through a [`Tap`].
-///
-/// Neither side ever waits on the other. The audio path drops a sample rather than block
-/// on the analyser, and the analyser skips a frame rather than block on the audio path:
-/// losing analysis work is what the spec asks for, delaying a sample is not.
 #[derive(Clone)]
 pub struct SampleTap(Arc<Mutex<Ring>>);
 
 struct Ring {
     samples: Box<[f32]>,
-    /// Where the next sample goes
+
     write: usize,
-    /// False until `write` has wrapped once, so a barely started stream is not analysed
-    /// with the silence it was allocated with
+
     wrapped: bool,
-    /// What the samples held are interleaved at
+
     channels: usize,
 }
 
@@ -195,10 +147,6 @@ impl SampleTap {
         })))
     }
 
-    /// The samples held, oldest first, with the channel count they are interleaved at.
-    ///
-    /// `None` when the buffer is momentarily taken by the audio path, a frame the caller
-    /// skips rather than waits for.
     pub fn take(&self) -> Option<(Vec<f32>, usize)> {
         let ring = self.try_ring()?;
         let samples = if ring.wrapped {
@@ -210,19 +158,12 @@ impl SampleTap {
         Some((samples, ring.channels))
     }
 
-    /// Forgets everything held. Called when the decoder chain is torn down, so audio from
-    /// before a seek is never analysed together with the audio that replaced it.
     pub fn clear(&self) {
         let mut ring = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         ring.write = 0;
         ring.wrapped = false;
     }
 
-    /// The buffer, unless it is momentarily taken.
-    ///
-    /// Poisoning is recovered: the ring is plain data with no invariant a panic elsewhere
-    /// could break, and refusing it would silence the analyser for the life of the daemon,
-    /// indistinguishable from the outside from one that has simply gone quiet.
     fn try_ring(&self) -> Option<MutexGuard<'_, Ring>> {
         match self.0.try_lock() {
             Ok(ring) => Some(ring),
@@ -231,7 +172,6 @@ impl SampleTap {
         }
     }
 
-    /// Records one sample, or drops it if the buffer is taken.
     fn push(&self, sample: f32, channels: usize) {
         let Some(mut ring) = self.try_ring() else {
             return;
@@ -246,7 +186,6 @@ impl SampleTap {
         ring.channels = channels;
     }
 
-    /// Holds the buffer the way a slow analyser would.
     #[cfg(test)]
     fn hold(&self) -> MutexGuard<'_, Ring> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
@@ -259,9 +198,6 @@ impl Default for SampleTap {
     }
 }
 
-/// A `Source` adapter that copies what is pulled through it into a [`SampleTap`], and is
-/// otherwise transparent: every sample is returned exactly as the inner source produced it,
-/// and everything the player asks about the stream, seeks included, is forwarded untouched.
 pub struct Tap<S> {
     inner: S,
     tap: SampleTap,
@@ -320,8 +256,6 @@ mod tests {
     use crate::audio::testing;
 
     fn runtime() -> tokio::runtime::Runtime {
-        // Multi-threaded on purpose: the audio thread reaches the network through
-        // `Handle::block_on`, which cannot drive a current-thread runtime from off it
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -337,8 +271,6 @@ mod tests {
         )
     }
 
-    /// The tap is on the audio path, so the one thing it must never do is change what
-    /// comes out of it.
     #[test]
     fn the_tap_yields_exactly_the_samples_it_was_given() {
         let samples: Vec<f32> = (0..4_096).map(|n| (n % 97) as f32 / 97.0 - 0.5).collect();
@@ -381,9 +313,6 @@ mod tests {
         assert!(held.is_empty(), "the tap kept {} samples", held.len());
     }
 
-    /// What "analysis never stalls audio" means in practice: with the buffer held for
-    /// far longer than a frame, the samples still come through at once and unchanged.
-    /// The analysis work is what gets dropped.
     #[test]
     fn a_held_buffer_never_delays_the_samples_passing_through_the_tap() {
         let tap = SampleTap::new();
@@ -416,9 +345,6 @@ mod tests {
         );
     }
 
-    /// A panic elsewhere must not cost the spectrum for the life of the daemon. The ring
-    /// holds no invariant a panic could break, so the buffer is recovered rather than
-    /// refused, and the tap goes on recording and reporting.
     #[test]
     fn a_poisoned_buffer_does_not_silence_the_tap_forever() {
         let tap = SampleTap::new();
@@ -491,8 +417,6 @@ mod tests {
 
     #[test]
     fn an_unreadable_local_copy_falls_back_to_streaming_rather_than_failing_the_load() {
-        // The enclosure URL is unroutable, so the fallback is observable as a streaming
-        // failure rather than as the local error the truncated file would have produced
         let fixture = testing::Fixture::new();
         let truncated = fixture.directory.path().join("truncated.wav");
         File::create(&truncated)

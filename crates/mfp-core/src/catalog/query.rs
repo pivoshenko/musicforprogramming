@@ -1,8 +1,3 @@
-//! Search and ordering over the catalog.
-//!
-//! Filtering to locally available episodes lives with the caller, the side that knows
-//! what the download cache holds.
-
 use crate::model::{Catalog, Episode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,7 +5,7 @@ pub enum SortKey {
     Published,
     Title,
     Duration,
-    /// The site's own ordering, which only enriched episodes carry.
+
     Order,
 }
 
@@ -20,16 +15,12 @@ pub enum SortDirection {
     Descending,
 }
 
-/// Whether the episode matches a free-text query, case-insensitively, as a substring of
-/// its title or of any enriched text it has.
-///
-/// An empty query matches everything.
+/// Case-insensitive substring of the title or of any enriched text. An empty query
+/// matches everything.
 pub fn matches(episode: &Episode, query: &str) -> bool {
     matches_needle(episode, &needle(query))
 }
 
-/// The prepared form of a query: trimmed and lowercased once, rather than once per
-/// episode it is tested against.
 fn needle(query: &str) -> String {
     query.trim().to_lowercase()
 }
@@ -47,10 +38,8 @@ fn matches_needle(episode: &Episode, needle: &str) -> bool {
             .any(|field| contains(field, needle))
 }
 
-/// Whether `haystack` carries `lowercase_needle`, ignoring letter case.
-///
-/// Folds one character at a time rather than lowercasing a copy: a search runs this over
-/// every track listing, where the copies were the bulk of what a keystroke cost.
+/// Folds one character at a time rather than lowercasing a copy: this runs over every
+/// track listing on every keystroke, where the copies were the bulk of the cost.
 fn contains(haystack: &str, lowercase_needle: &str) -> bool {
     haystack.char_indices().any(|(offset, _)| {
         let mut folded = haystack[offset..].chars().flat_map(char::to_lowercase);
@@ -66,7 +55,6 @@ fn contains(haystack: &str, lowercase_needle: &str) -> bool {
     })
 }
 
-/// Every episode matching the query, in the catalog's current order.
 pub fn search<'a>(catalog: &'a Catalog, query: &str) -> Vec<&'a Episode> {
     let needle = needle(query);
     catalog
@@ -76,8 +64,6 @@ pub fn search<'a>(catalog: &'a Catalog, query: &str) -> Vec<&'a Episode> {
         .collect()
 }
 
-/// Every episode the predicate reports a complete local audio file for.
-///
 /// The predicate belongs to the caller: only the daemon knows what the download cache holds.
 pub fn filter<'a>(episodes: &[&'a Episode], keep: impl Fn(&Episode) -> bool) -> Vec<&'a Episode> {
     episodes
@@ -87,11 +73,9 @@ pub fn filter<'a>(episodes: &[&'a Episode], keep: impl Fn(&Episode) -> bool) -> 
         .collect()
 }
 
-/// Sorts totally and stably: equal episodes keep their relative order, and an episode
-/// missing the sort key is ordered deterministically rather than dropped.
+/// Total and stable: equal episodes keep their relative order, and one missing the sort
+/// key is ordered deterministically rather than dropped.
 pub fn sort(episodes: &mut [&Episode], key: SortKey, direction: SortDirection) {
-    // `None` sorts before `Some`, so an episode missing the key lands at one end rather
-    // than in an arbitrary place
     match key {
         SortKey::Published => sort_by_key(episodes, direction, |episode| episode.published_at),
         SortKey::Title => sort_by_key(episodes, direction, |episode| episode.title.to_lowercase()),
@@ -100,8 +84,6 @@ pub fn sort(episodes: &mut [&Episode], key: SortKey, direction: SortDirection) {
     }
 }
 
-/// Sorts on a key computed once per episode rather than once per comparison, which is
-/// what a lowercased title costs when it is folded inside the comparator.
 fn sort_by_key<K: Ord>(
     episodes: &mut [&Episode],
     direction: SortDirection,
@@ -123,25 +105,21 @@ fn sort_by_key<K: Ord>(
     }
 }
 
-/// The totals the site displays across the whole catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Statistics {
     pub episodes: usize,
-    /// How many tracks are listed across every available track listing.
+
     pub tracks: usize,
-    /// The summed duration of every episode, in whole seconds.
-    ///
-    /// Raw seconds: the site's own hour figure is a full day too high, so the presentation
-    /// layer divides this rather than copying that arithmetic.
+
+    /// Raw seconds. The site's own hour figure is a full day too high, so presentation divides
+    /// this rather than copying that arithmetic.
     pub duration_secs: u64,
 }
 
-/// Track listings come from best-effort enrichment, so a catalog carrying none reports no
-/// tracks rather than failing.
 pub fn statistics(catalog: &Catalog) -> Statistics {
     Statistics {
         episodes: catalog.episodes.len(),
-        // one track per line, which is what the site counts as one `<br>`
+
         tracks: catalog
             .episodes
             .iter()
@@ -229,7 +207,6 @@ mod tests {
 
         let matched = titles(&search(&catalog, "seventy"));
 
-        // the query appears in no title, only in the slugs of episodes 70 to 79
         assert_eq!(matched.len(), 10);
         assert!(matched.contains(&"Episode 70: THINGS DISAPPEAR".to_owned()));
     }
@@ -409,7 +386,7 @@ mod tests {
         assert_eq!(statistics.episodes, 79);
         assert_eq!(statistics.tracks, 1380);
         assert_eq!(statistics.duration_secs, 347_111);
-        // 96 hours, 25 minutes, and 11 seconds, and never the site's day-of-month sum
+
         assert_eq!(statistics.duration_secs / 3_600, 96);
         assert_eq!(statistics.duration_secs % 3_600 / 60, 25);
         assert_eq!(statistics.duration_secs % 60, 11);
@@ -439,7 +416,6 @@ mod tests {
         assert_eq!(catalog.info_page("credits").unwrap().title, "Credits");
         assert!(catalog.info_page("nothing").is_none());
 
-        // counting, ordering, and next-or-previous are over episodes alone
         assert_eq!(statistics(&catalog).episodes, 79);
         assert_eq!(search(&catalog, "").len(), 79);
         assert_eq!(catalog.episodes[0].title, "Episode 79: Corticyte");

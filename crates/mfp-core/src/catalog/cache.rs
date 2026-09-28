@@ -1,10 +1,3 @@
-//! The on-disk catalog cache.
-//!
-//! A cache younger than [`TTL_SECS`] is served without touching the network. An older one
-//! triggers a refresh, and a failed refresh falls back to the stale copy - the caller
-//! tells staleness from [`crate::model::Catalog::age_secs`]. Only a cache miss with no
-//! reachable network is an error.
-
 use std::future::Future;
 use std::path::Path;
 
@@ -14,16 +7,13 @@ use crate::model::Catalog;
 /// How long a cached catalog stays fresh.
 pub const TTL_SECS: i64 = 6 * 60 * 60;
 
-/// Returns the catalog, from cache where it is fresh and from the network otherwise.
-///
-/// `force_refresh` ignores freshness; a forced refresh that fails leaves the cache file
-/// intact and returns the previously cached catalog.
+/// Cache where it is fresh, network otherwise. A refresh that fails falls back to the
+/// stale copy, so only a cache miss with no reachable network is an error.
 pub async fn load(client: &reqwest::Client, force_refresh: bool) -> Result<Catalog> {
     let path = crate::paths::catalog_cache_file()?;
     resolve(&path, now_secs(), force_refresh, || refresh(client)).await
 }
 
-/// Builds a catalog from the network: the authoritative feed, then best-effort enrichment.
 async fn refresh(client: &reqwest::Client) -> Result<Catalog> {
     let mut episodes = super::feed::fetch(client).await?;
     let enrichment = super::enrich::enrich(client, &mut episodes).await;
@@ -35,7 +25,6 @@ async fn refresh(client: &reqwest::Client) -> Result<Catalog> {
     })
 }
 
-/// The cache policy, over an injected clock and refresh so it can be exercised offline.
 async fn resolve<F, Fut>(path: &Path, now: i64, force_refresh: bool, refresh: F) -> Result<Catalog>
 where
     F: FnOnce() -> Fut,
@@ -52,13 +41,12 @@ where
 
     match refresh().await {
         Ok(catalog) => {
-            // a catalog that cannot be cached is still a catalog
             if let Err(error) = write(path, &catalog) {
                 tracing::debug!("the catalog cache could not be written: {error}");
             }
             Ok(catalog)
         }
-        // the cache file is left exactly as it was, so a failed refresh costs nothing
+
         Err(error) => match cached {
             Some(catalog) => {
                 tracing::warn!(
@@ -74,7 +62,7 @@ where
     }
 }
 
-/// Reads the cache file. An unreadable or unparseable file is a miss, not an error.
+/// An unreadable or unparseable cache file is a miss, not an error.
 pub fn read(path: &Path) -> Option<Catalog> {
     let text = std::fs::read_to_string(path).ok()?;
     match serde_json::from_str(&text) {
@@ -86,10 +74,8 @@ pub fn read(path: &Path) -> Option<Catalog> {
     }
 }
 
-/// Writes the catalog as a normalised JSON document.
-///
-/// The document is written beside the cache file and renamed over it, so a write cut
-/// short leaves the previous catalog rather than half of this one.
+/// Written beside the cache file and renamed over it, so a write cut short leaves the
+/// previous catalog rather than half of this one.
 pub fn write(path: &Path, catalog: &Catalog) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -142,8 +128,6 @@ mod tests {
         }
     }
 
-    /// A refresh that records whether it ran, so a test can assert whether the network was
-    /// reached.
     struct Network<'a> {
         result: Result<Catalog>,
         calls: &'a Cell<usize>,
@@ -344,8 +328,6 @@ mod tests {
         assert!(read(&root.path().join("nothing.json")).is_none());
     }
 
-    /// A truncated cache file reads as a miss, which costs a network fetch, so the write
-    /// must never be observable half-done.
     #[test]
     fn a_written_catalog_replaces_the_last_one_and_leaves_no_partial_file() {
         let root = tempfile::tempdir().unwrap();

@@ -1,72 +1,51 @@
-//! The episode model and the catalog that holds it.
-//!
-//! An episode has two tiers of fields. The first six come from the authoritative RSS feed
-//! and are present for every episode. The rest come from best-effort enrichment out of the
-//! site's client bundle, and are `Option` so an absent value cannot be mistaken for a real
-//! one.
-
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-/// One episode of musicforprogramming.net.
+/// One episode of musicforprogramming.net. The first six fields come from the
+/// authoritative feed; the rest are `Option` because enrichment is best-effort.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Episode {
     pub title: String,
-    /// The episode's page on the site.
+
     pub link: String,
-    /// The audio enclosure URL, and the episode's stable identity: enrichment records join
-    /// to episodes by exact string equality against it.
+
+    /// The audio URL, and the episode's identity: enrichment records join to episodes by
+    /// exact string equality against it.
     pub enclosure_url: String,
-    /// The byte length the feed declares for the enclosure.
+
     pub byte_len: u64,
-    /// The duration the feed declares in `itunes:duration`, in seconds.
-    ///
-    /// An approximate total, never a measured audio length. Consumers must present it as
-    /// approximate.
+
+    /// Whole seconds as the feed declares them. An approximation, never a measured length.
     pub duration_secs: u64,
-    /// Publication time as whole seconds since the Unix epoch.
+
     pub published_at: i64,
 
-    /// Site slug, when enrichment supplied one.
     #[serde(default)]
     pub slug: Option<String>,
-    /// The site's own catalog ordering, when enrichment supplied one.
+
     #[serde(default)]
     pub order: Option<u32>,
-    /// Track listing as plain text, one track per line, when enrichment supplied one.
+
     #[serde(default)]
     pub tracklist: Option<String>,
-    /// Descriptive body as plain text, when enrichment supplied one.
+
     #[serde(default)]
     pub body: Option<String>,
-    /// Related links as plain text, one per line, when enrichment supplied any.
+
     #[serde(default)]
     pub links: Option<String>,
-    /// The site's own title for this episode, when enrichment supplied one.
-    ///
-    /// The feed says `Episode 79: Corticyte` where the site says `79: Corticyte`, and
-    /// anything replicating the site's presentation wants the latter, which
-    /// [`Episode::site_title`] resolves.
+
     #[serde(default)]
     pub bundle_title: Option<String>,
-    /// Whether the site flags this episode for distinct colouring.
-    ///
-    /// Exactly one episode carries it today; absent enrichment every episode reports
-    /// `false`, so an unknown flag is never mistaken for a set one. Presentation only:
-    /// ordering, playback, and download all ignore it.
+
     #[serde(default)]
     pub special: bool,
 }
 
 impl Episode {
-    /// The episode's stable filesystem-safe identifier, used to name its on-disk artifacts
-    /// and as the `slug` clients pass over the wire.
-    ///
-    /// The enrichment slug where one exists, a deterministic derivation from the enclosure
-    /// URL otherwise, so the same episode resolves to the same name across runs whether or
-    /// not enrichment succeeded. Borrowed from the slug in the enriched case, so scanning
-    /// the catalog for one identifier allocates nothing.
+    /// The stable filesystem-safe identifier naming this episode's on-disk artifacts: the
+    /// enrichment slug where there is one, a derivation from the enclosure URL otherwise.
     pub fn id(&self) -> Cow<'_, str> {
         match &self.slug {
             Some(slug) => Cow::Borrowed(slug),
@@ -79,12 +58,7 @@ impl Episode {
 }
 
 impl Episode {
-    /// The title as the site itself writes it, which every view replicating the site draws.
-    ///
-    /// Enrichment's title where there is one, otherwise the feed's with its `Episode `
-    /// prefix stripped, since the feed writes `Episode 79: Corticyte` where the site writes
-    /// `79: Corticyte` - so an un-enriched catalog degrades to the same shape rather than
-    /// a visibly different one.
+    /// The title as the site writes it, which the feed's `Episode ` prefix is stripped for.
     pub fn site_title(&self) -> &str {
         match &self.bundle_title {
             Some(title) => title,
@@ -93,20 +67,13 @@ impl Episode {
     }
 }
 
-/// The site's form of a title that may have come from the feed.
-///
-/// The feed writes `Episode 79: Corticyte` where the site writes `79: Corticyte`. Anything
-/// rendering the site's presentation from a title it did not get from enrichment - the
-/// marquee, which only ever sees the daemon's snapshot - normalises through this, so the
-/// two cannot drift.
+/// Normalises a feed title to the site's form, so the two presentations cannot drift.
 pub fn site_title(title: &str) -> &str {
     title.strip_prefix("Episode ").unwrap_or(title)
 }
 
-/// FNV-1a over 64 bits.
-///
-/// Written out rather than taken from `DefaultHasher`, whose output std explicitly does
-/// not guarantee across releases, because on-disk names must survive a toolchain upgrade.
+/// FNV-1a over 64 bits, written out rather than taken from `DefaultHasher`, whose output
+/// std does not guarantee across releases: on-disk names must survive a toolchain bump.
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
@@ -116,38 +83,26 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// One of the site's non-episode pages, kept so the interface can present it as the site
-/// does.
-///
-/// Same enrichment source as track listings, but with no audio to join to, which is why
-/// these live beside [`Catalog::episodes`] rather than in it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InfoPage {
-    /// Site slug, which is this page's identity: `about` or `credits`.
     pub slug: String,
-    /// Display title as the bundle gives it.
+
     pub title: String,
     pub body: String,
 }
 
-/// The resolved episode list together with when it was built.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Catalog {
-    /// Every episode the feed listed, in catalog order.
     pub episodes: Vec<Episode>,
-    /// The site's information pages, keyed by their slug.
-    ///
-    /// Deliberately separate from `episodes`: every count, ordering, and next-or-previous
-    /// computation is over episodes alone, and keeping these out of that list makes it true
-    /// by construction rather than by remembering to filter.
+
     #[serde(default)]
+    /// Kept out of `episodes` so every count and next-or-previous computation is over
+    /// episodes alone by construction rather than by remembering to filter.
     pub info: Vec<InfoPage>,
-    /// When this catalog was built from the network, as whole seconds since the Unix epoch.
-    /// A catalog read back from disk keeps its fetch time, so callers can tell how stale it
-    /// is.
+
+    /// When this catalog was built from the network, in whole seconds since the Unix epoch.
     pub fetched_at: i64,
-    /// Whether the client bundle enriched this catalog. False means every episode carries
-    /// feed fields only.
+
     pub enriched: bool,
 }
 
@@ -156,17 +111,15 @@ impl Catalog {
         self.episodes.iter().find(|episode| episode.id() == id)
     }
 
-    /// The index of the episode with this identifier, for `next` and `previous`.
     pub fn position(&self, id: &str) -> Option<usize> {
         self.episodes.iter().position(|episode| episode.id() == id)
     }
 
-    /// How long ago this catalog was fetched, in seconds, relative to `now`.
+    /// How long ago this catalog was fetched, in seconds, clamped at zero.
     pub fn age_secs(&self, now: i64) -> i64 {
         (now - self.fetched_at).max(0)
     }
 
-    /// The information page with this slug, if enrichment supplied one.
     pub fn info_page(&self, slug: &str) -> Option<&InfoPage> {
         self.info.iter().find(|page| page.slug == slug)
     }
@@ -269,8 +222,6 @@ mod tests {
 
     #[test]
     fn an_un_enriched_site_title_drops_the_feeds_episode_prefix() {
-        // the feed writes `Episode 79: Corticyte` where the site writes `79: Corticyte`,
-        // so an un-enriched catalog must not render a visibly different shape
         let mut episode = episode(None);
         episode.title = "Episode 79: Corticyte".into();
         assert_eq!(episode.site_title(), "79: Corticyte");
@@ -325,7 +276,6 @@ mod tests {
         assert_eq!(catalog.info_page("credits").unwrap().title, "Credits");
         assert!(catalog.info_page("seventynine").is_none());
 
-        // the whole point of the separate collection: counting and navigating never see them
         assert_eq!(catalog.episodes.len(), 1);
         assert!(catalog.get("about").is_none());
         assert!(catalog.position("credits").is_none());

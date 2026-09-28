@@ -1,11 +1,3 @@
-//! Downloading a release archive, verifying it, and swapping the binaries in place.
-//!
-//! Nothing on disk is touched until the whole archive is in memory and its SHA-256 matches
-//! what `checksums.txt` declares, and each binary is then staged beside its destination and
-//! moved onto it with a rename. A rename within a directory cannot half-succeed, so an
-//! interrupted update leaves the working copy behind rather than a truncated one - which a
-//! write-in-place would not, and which matters most for the binary doing the writing.
-
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,12 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 
-/// Nothing this player ships comes close, and an archive far larger than a release is a
-/// reason to stop rather than to fill memory with it.
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Fetches `url` whole. Release archives are a few megabytes and every byte is needed before
-/// anything can be verified, so there is nothing to stream to.
 pub fn download(http: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
     let response = http
         .get(url)
@@ -32,10 +20,6 @@ pub fn download(http: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> 
         .to_vec())
 }
 
-/// Checks `data` against the entry for `name` in a `sha256sum`-format listing.
-///
-/// A missing entry is a failure, not a skip: an unverified binary is exactly what this
-/// guards against, and the release always publishes the file.
 pub fn verify(data: &[u8], name: &str, checksums: &str) -> Result<()> {
     let expected = checksums
         .lines()
@@ -54,12 +38,6 @@ pub fn verify(data: &[u8], name: &str, checksums: &str) -> Result<()> {
     Ok(())
 }
 
-/// Unpacks the wanted binaries from `archive` and moves each onto its destination.
-///
-/// The pair is staged in full first and only then renamed, so a failure to extract one does
-/// not leave the other already replaced. The two renames themselves are separate calls and
-/// a crash between them would leave one binary newer than the other, which the protocol's
-/// forward tolerance is there to survive.
 pub fn replace(archive: &[u8], destinations: &[(&str, PathBuf)]) -> Result<()> {
     let mut staged = Vec::with_capacity(destinations.len());
 
@@ -87,10 +65,6 @@ pub fn replace(archive: &[u8], destinations: &[(&str, PathBuf)]) -> Result<()> {
     Ok(())
 }
 
-/// Reads one named binary out of the gzipped tar, ignoring everything else it carries.
-///
-/// Matched on the file name alone and never unpacked to a path the archive chose: an entry
-/// is a name to look for here, not a destination to obey.
 fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>> {
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
     for entry in tar.entries().context("The archive could not be read")? {
@@ -111,8 +85,6 @@ fn extract(archive: &[u8], name: &str) -> Result<Vec<u8>> {
     Err(anyhow!("The archive does not contain {name}"))
 }
 
-/// Writes `bytes` executable beside `destination`, where a rename onto it cannot cross a
-/// filesystem boundary.
 fn stage(bytes: &[u8], destination: &Path) -> Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -144,10 +116,6 @@ mod tests {
         encoder.finish().unwrap()
     }
 
-    /// A tarball carrying one entry under a name `tar::Builder` would refuse to write.
-    ///
-    /// The name goes straight into the header, because the point of the test it serves is
-    /// what happens to an archive nothing well-behaved produced.
     fn tarball_with_raw_name(name: &[u8], bytes: &[u8]) -> Vec<u8> {
         let mut header = tar::Header::new_gnu();
         header.as_gnu_mut().unwrap().name[..name.len()].copy_from_slice(name);
@@ -167,8 +135,6 @@ mod tests {
     fn sha256(data: &[u8]) -> String {
         format!("{:x}", Sha256::digest(data))
     }
-
-    // == Verification ==
 
     #[test]
     fn a_matching_checksum_verifies() {
@@ -216,8 +182,6 @@ mod tests {
         assert!(error.to_string().contains("no entry"), "{error}");
     }
 
-    // == Extraction ==
-
     #[test]
     fn a_named_binary_is_read_out_of_the_archive() {
         let archive = tarball(&[("mfp", b"client"), ("mfp-daemon", b"daemon")]);
@@ -231,8 +195,6 @@ mod tests {
         assert_eq!(extract(&archive, "mfp").unwrap(), b"client");
     }
 
-    /// An entry is a name to look for, never a destination to obey: extraction hands back
-    /// bytes and the caller decides where they go, so a traversing name has nowhere to lead.
     #[test]
     fn a_traversing_entry_is_read_as_bytes_rather_than_followed() {
         let archive = tarball_with_raw_name(b"../../../../etc/mfp", b"hostile");
@@ -259,8 +221,6 @@ mod tests {
     fn a_damaged_archive_is_an_error_rather_than_a_panic() {
         assert!(extract(b"not a gzip stream at all", "mfp").is_err());
     }
-
-    // == Replacement ==
 
     #[test]
     fn both_binaries_are_replaced_and_left_executable() {

@@ -1,5 +1,3 @@
-//! Serving clients over the socket.
-
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,76 +24,46 @@ use crate::download::DownloadManager;
 use crate::download::cache::{self, EpisodeCacheState};
 use crate::state::{SharedState, StateStore, lock};
 
-/// What the socket server needs from the rest of the daemon.
-///
-/// Dispatch is defined against this rather than against the engine and the download manager,
-/// so the wire behaviour - framing, ordering, error codes, the event tick, the lifecycle -
-/// is exercised over a real socket without an audio device.
-///
-/// Every method returns as soon as the command is *accepted*, never waiting for audio to
-/// resume or a transfer to finish; clients observe that through snapshots.
 pub trait Player: Send + Sync + 'static {
-    /// The complete current state. Never a delta.
     fn snapshot(&self) -> StateSnapshot;
-    /// Starts the named episode, or resumes the loaded one when no identifier is given.
+
     fn play(&self, id: Option<&str>) -> Result<()>;
     fn pause(&self) -> Result<()>;
     fn toggle(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
-    /// Exactly one of the two arguments is set; any other combination was already rejected
-    /// by the protocol layer as `invalid_params`.
+
     fn seek(&self, position_secs: Option<f64>, delta_secs: Option<f64>) -> Result<()>;
     fn next(&self) -> Result<()>;
     fn previous(&self) -> Result<()>;
     fn download(&self, id: &str) -> Result<()>;
     fn cancel_download(&self, id: &str) -> Result<()>;
-    /// Removes an episode's local copy. Not merely accepted: it answers once the files are
-    /// gone, because a client's next cache scan must not still see them, and it awaits a
-    /// cancelled transfer letting go of its part file - hence the only boxed future here.
+
     fn delete_download<'a>(&'a self, id: &'a str) -> BoxedFuture<'a, Result<()>>;
-    /// The catalog the daemon holds, so clients never read its cache file themselves.
+
     fn list_catalog(&self) -> Result<Catalog>;
-    /// Marks an episode a favourite, or unmarks it. Repeating either is not an error, so a
-    /// client never has to read the set before writing to it.
+
     fn set_favourite(&self, id: &str, favourite: bool) -> Result<()>;
-    /// The current set of favourites, by episode identifier.
+
     fn list_favourites(&self) -> Vec<String>;
-    /// Applies the palette preference if given and returns the resulting set; given nothing,
-    /// this is a read. Preferences are the interface's own: none touches playback, the
-    /// catalog, or the daemon's lifetime.
+
     fn preferences(&self, inverted_palette: Option<bool>) -> Preferences;
-    /// What has moved in the snapshot since `previous`.
-    ///
-    /// Answered without cloning the snapshot, so the poll that finds nothing owed - at
-    /// [`PUSH_POLL`], the overwhelming majority - allocates nothing. The default is the
-    /// honest answer for an implementation with no cheaper route.
+
     fn moved(&self, previous: &StateSnapshot) -> Moved {
         let state = self.snapshot();
         Moved::between(&state, previous)
     }
 
-    /// Offers the position playback has reached for persistence and lets a debounced write
-    /// happen. Called on the event tick, whether or not any client is connected.
     fn tick(&self);
-    /// Stops audio, cancels transfers, and flushes persisted state. Called once, after the
-    /// `shutdown` response is on the wire.
+
     fn shutdown(&self);
 }
 
-/// The most one request line may hold before it is refused.
-///
-/// A request is a JSON object carrying at most an episode identifier, so a mebibyte is
-/// orders of magnitude more than one needs and far too little to trouble the daemon.
-/// Uncapped, a client that never sends a newline grows the read buffer without bound and
-/// kills the daemon - which outlives every client so that closing one cannot stop the audio.
 pub const MAX_REQUEST_BYTES: usize = 1 << 20;
 
-/// What one poll found had changed in the shared state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Moved {
-    /// Any field but the spectrum differs, which is pushed on the poll that sees it.
     pub beyond_the_spectrum: bool,
-    /// The spectrum differs, which is pushed no faster than [`SPECTRUM_PUSH_INTERVAL`].
+
     pub spectrum: bool,
 }
 
@@ -108,36 +76,24 @@ impl Moved {
     }
 }
 
-/// A future returned from behind a `dyn` reference, which `async fn` in a trait cannot be.
 pub type BoxedFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// What reading one request line off a connection produced.
 enum Incoming {
-    /// A line within [`MAX_REQUEST_BYTES`].
     Line(String),
-    /// A line over the cap. Its bytes are discarded as they arrive and the rest read and
-    /// dropped, so the connection resynchronises on the next request rather than closing.
+
     TooLong,
-    /// The client has nothing further to send.
+
     Closed,
 }
 
-/// One connection's request line so far, held by the caller rather than by the future that
-/// fills it.
-///
-/// [`read_request`] is one arm of a `select!`, so a push falling due mid-request drops that
-/// future where it stands. The bytes it already took are gone from the reader, so holding
-/// them anywhere but here would lose them and leave the rest of the line parsed as a request
-/// of its own.
 #[derive(Default)]
 struct Partial {
     line: Vec<u8>,
-    /// Whether this line has already passed the cap, so the rest of it is being discarded.
+
     over: bool,
 }
 
 impl Partial {
-    /// Takes what has been read, leaving the next line to start empty.
     fn take(&mut self) -> std::io::Result<Incoming> {
         let taken = std::mem::take(self);
         if taken.over {
@@ -149,10 +105,6 @@ impl Partial {
     }
 }
 
-/// Reads one newline-terminated request, refusing one longer than [`MAX_REQUEST_BYTES`].
-///
-/// Spelled out rather than left to [`AsyncBufReadExt::lines`], whose buffer has no cap.
-/// Cancellation safe, which is what `partial` is for.
 async fn read_request(
     reader: &mut (impl AsyncBufRead + Unpin),
     partial: &mut Partial,
@@ -160,7 +112,6 @@ async fn read_request(
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            // a client that shut its write half without a final newline still meant those bytes
             if partial.over || partial.line.is_empty() {
                 *partial = Partial::default();
                 return Ok(Incoming::Closed);
@@ -174,8 +125,6 @@ async fn read_request(
                 .line
                 .extend_from_slice(&available[..newline.unwrap_or(taken)]);
             if partial.line.len() > MAX_REQUEST_BYTES {
-                // released at the cap rather than at the newline, so a line that never ends
-                // never holds more than one read of itself
                 partial.line = Vec::new();
                 partial.over = true;
             }
@@ -187,11 +136,6 @@ async fn read_request(
     }
 }
 
-/// Runs the daemon until an explicit `shutdown` or a configured idle timeout.
-///
-/// Creates the tokio runtime, resolves and binds the socket, restores persisted state,
-/// starts the audio thread, and serves clients. Returns [`ExitCode::SUCCESS`] without
-/// disturbing anything when a live daemon already owns the endpoint.
 pub fn run() -> anyhow::Result<ExitCode> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -208,7 +152,7 @@ pub fn run() -> anyhow::Result<ExitCode> {
         let _guard = runtime.enter();
         match bind(&socket_path)? {
             Some(listener) => listener,
-            // a live daemon owns the endpoint; leave it and its socket file alone
+
             None => return Ok(ExitCode::SUCCESS),
         }
     };
@@ -223,14 +167,6 @@ pub fn run() -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Binds the socket, treating the path as the single-instance lock.
-///
-/// `Ok(None)` means a connection to the existing socket succeeded, so a live daemon owns the
-/// endpoint and this process should exit 0 leaving the socket file alone. A socket that exists
-/// but refuses a connection is stale: unlinked and rebound automatically, with no flag and no
-/// user intervention. A regular file at the path is an error and is not deleted.
-///
-/// Must be called inside the tokio runtime.
 pub fn bind(socket_path: &Path) -> Result<Option<UnixListener>> {
     mfp_core::paths::ensure_socket_dir(socket_path)?;
 
@@ -240,8 +176,7 @@ pub fn bind(socket_path: &Path) -> Result<Option<UnixListener>> {
             if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
                 return Ok(None);
             }
-            // nothing answers, so the path is stale - but only unlink a socket, never a
-            // file somebody else put there
+
             if !std::fs::symlink_metadata(socket_path)?
                 .file_type()
                 .is_socket()
@@ -258,10 +193,6 @@ pub fn bind(socket_path: &Path) -> Result<Option<UnixListener>> {
     }
 }
 
-/// Accepts clients until an explicit `shutdown` or the idle timeout, then tears the player
-/// down.
-///
-/// Serving outlives every client on purpose: a closed pane must not stop the audio.
 pub async fn serve(
     listener: UnixListener,
     player: Arc<dyn Player>,
@@ -270,8 +201,6 @@ pub async fn serve(
     let (shutdown, mut stopping) = watch::channel(false);
     let clients = Arc::new(AtomicUsize::new(0));
 
-    // one poller decides for the whole daemon, so the spectrum's rate limit is the daemon's
-    // property rather than each connection's
     let (pushes, watching) = watch::channel(Push::new(player.snapshot(), 0));
     tokio::spawn(broadcast(Arc::clone(&player), pushes, shutdown.subscribe()));
 
@@ -290,8 +219,7 @@ pub async fn serve(
     loop {
         tokio::select! {
             _ = stopping.changed() => break,
-            // persistence rides the daemon's own tick and not a client's, so a position
-            // goes on being recorded with nobody connected
+
             _ = ticker.tick() => player.tick(),
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
@@ -312,11 +240,6 @@ pub async fn serve(
     player.shutdown();
 }
 
-/// Serves one client: reads request lines, answers them in order, and pushes events once
-/// the connection has subscribed.
-///
-/// One task owns the write half, so a pushed event can never interleave into the middle of
-/// a response line.
 async fn serve_connection(
     stream: UnixStream,
     player: Arc<dyn Player>,
@@ -330,7 +253,7 @@ async fn serve_connection(
     let mut partial = Partial::default();
     let mut subscribed = false;
     let mut wants_spectrum = false;
-    // everything the daemon has pushed so far predates this connection
+
     let mut sent_changes = pushes.borrow_and_update().changes;
 
     loop {
@@ -341,8 +264,7 @@ async fn serve_connection(
                     break;
                 }
                 let push = pushes.borrow_and_update().clone();
-                // a connection that opted out is owed nothing for a spectrum-only push, and
-                // the count stays right even when the channel coalesced it with one it is owed
+
                 if !wants_spectrum && push.changes == sent_changes {
                     continue;
                 }
@@ -357,7 +279,7 @@ async fn serve_connection(
                 let line = match incoming {
                     Ok(Incoming::Line(line)) => line,
                     Ok(Incoming::TooLong) => {
-                        // no identifier to answer under: the request was never parsed
+
                         let refusal = Response::failure(
                             None,
                             &Error::InvalidParams(format!(
@@ -371,8 +293,7 @@ async fn serve_connection(
                     }
                     Ok(Incoming::Closed) => break,
                     Err(error) => {
-                        // distinguishes a client that died mid-frame from one that closed
-                        // politely, which is the difference a dropped subscription turns on
+
                         tracing::debug!(%error, "could not read from a client");
                         break;
                     }
@@ -382,8 +303,7 @@ async fn serve_connection(
                 }
                 let (response, ends_the_process) = match parse_request(&line) {
                     Ok(request) => {
-                        // flags rather than a second ticker, so subscribing twice cannot
-                        // double the event rate
+
                         if let Command::Subscribe { spectrum } = request.cmd {
                             subscribed = true;
                             wants_spectrum |= spectrum;
@@ -406,19 +326,12 @@ async fn serve_connection(
     clients.fetch_sub(1, Ordering::SeqCst);
 }
 
-/// One snapshot the daemon has decided every subscribed connection should see.
-///
-/// Both forms are built once for the whole daemon rather than per connection: a connection
-/// that opted out of spectrum updates must be handed a snapshot without one, and the deep
-/// copy that strips it belongs here rather than in every writer.
 #[derive(Clone)]
 struct Push {
     state: Arc<StateSnapshot>,
-    /// The same snapshot with no spectrum, which is the same `Arc` when it had none.
+
     without_spectrum: Arc<StateSnapshot>,
-    /// How many pushes so far were owed to something other than the spectrum. A connection
-    /// that opted out writes only when this moves, which stays correct even when a slow
-    /// connection sees two pushes coalesced into one.
+
     changes: u64,
 }
 
@@ -448,18 +361,6 @@ impl Push {
     }
 }
 
-/// Decides, for the whole daemon, when a subscribed connection is owed a snapshot.
-///
-/// Nothing writing the shared state notifies anyone, so this polls it at [`PUSH_POLL`]. A
-/// change to any field but the spectrum is pushed on the poll that sees it; the fixed
-/// [`EVENT_TICK`] pushes whatever the state is doing, so a client that missed a frame is
-/// never left rendering from nothing; a spectrum that moved on its own waits out
-/// [`SPECTRUM_PUSH_INTERVAL`] since the last push of any kind.
-///
-/// The spectrum's gap is measured from every push and the tick's only from pushes that
-/// counted as a change. Sharing one instant is the bug this avoids: a spectrum at its cap
-/// would keep resetting the tick's gap, and a subscriber that opted out would then be pushed
-/// nothing at all.
 async fn broadcast(
     player: Arc<dyn Player>,
     pushes: watch::Sender<Push>,
@@ -468,9 +369,7 @@ async fn broadcast(
     let mut ticker = tokio::time::interval(PUSH_POLL);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last = Arc::new(player.snapshot());
-    // two gaps, deliberately not one: the spectrum's is measured from the last push of any
-    // kind, so it can never lift the rate above twenty a second; the tick's only from the
-    // last push that counted as a change, so a continuously moving spectrum cannot postpone it
+
     let mut last_push = Instant::now();
     let mut last_change = Instant::now();
     let mut changes = 0u64;
@@ -481,11 +380,8 @@ async fn broadcast(
             _ = ticker.tick() => {}
         }
 
-        // asked rather than taken: the poll that finds nothing owed is the common one, and
-        // it must not deep-copy the snapshot under the lock the audio thread is writing
         let moved = player.moved(&last);
-        // a real change and the fixed tick both count, and both are decided before the
-        // spectrum, so a spectrum push falling due at the same moment cannot swallow the tick
+
         let owed = if moved.beyond_the_spectrum || last_change.elapsed() >= EVENT_TICK {
             Some(true)
         } else if moved.spectrum && last_push.elapsed() >= SPECTRUM_PUSH_INTERVAL {
@@ -509,11 +405,6 @@ async fn broadcast(
     }
 }
 
-/// Whether these two snapshots differ in anything but the spectrum.
-///
-/// Spelled out field by field rather than derived. The snapshot is `#[non_exhaustive]`, so
-/// the binding below takes `..` and a new field no longer breaks this build: it must be added
-/// here by hand or it silently stops being pushed promptly.
 fn differs_beyond_the_spectrum(state: &StateSnapshot, previous: &StateSnapshot) -> bool {
     let StateSnapshot {
         playback,
@@ -531,8 +422,6 @@ fn differs_beyond_the_spectrum(state: &StateSnapshot, previous: &StateSnapshot) 
         ..
     } = state;
 
-    // Exact equality is the question: whether the field moved at all, not how far. A margin
-    // would swallow a real position change
     #[expect(
         clippy::float_cmp,
         reason = "a change test, not an approximate comparison"
@@ -594,8 +483,7 @@ async fn dispatch(player: &dyn Player, request: &Request) -> Response {
                 Err(error) => Response::failure(Some(request.id), &error),
             };
         }
-        // subscription is a property of the connection, and shutdown is answered before
-        // anything is torn down
+
         Command::Subscribe { .. } | Command::Shutdown => Ok(()),
     };
 
@@ -605,7 +493,6 @@ async fn dispatch(player: &dyn Player, request: &Request) -> Response {
     }
 }
 
-/// Writes one JSON value followed by a single newline.
 async fn write_line<W, T>(writer: &mut W, value: &T) -> std::io::Result<()>
 where
     W: AsyncWriteExt + Unpin,
@@ -616,9 +503,6 @@ where
     writer.write_all(line.as_bytes()).await
 }
 
-/// Ends the process once nothing has been playing, downloading, or connected for the
-/// configured duration. Only spawned when one is configured; unconfigured, the default,
-/// idles indefinitely.
 async fn idle_monitor(
     player: Arc<dyn Player>,
     clients: Arc<AtomicUsize>,
@@ -656,24 +540,17 @@ fn is_idle(state: &StateSnapshot) -> bool {
     !playing && !downloading
 }
 
-/// The real player: the audio thread, the downloads, the catalog, and the durable state
-/// behind one dispatch surface.
 pub struct DaemonPlayer {
     state: SharedState,
     audio: AudioEngine,
     downloads: DownloadManager,
     store: StateStore,
-    /// `None` when the catalog could not be served from cache or network, which every
-    /// command needing it reports as `catalog_unavailable`.
+
     catalog: Option<Catalog>,
     audio_dir: PathBuf,
 }
 
 impl DaemonPlayer {
-    /// Restores persisted state, loads the catalog, and starts the audio thread.
-    ///
-    /// A catalog that cannot be loaded is not fatal: the daemon still serves, reporting
-    /// `catalog_unavailable` for the commands that need one.
     pub fn start(runtime: &tokio::runtime::Runtime, config: &Config) -> Result<Self> {
         let store = StateStore::load(mfp_core::paths::state_file()?);
         let mut restored = StateSnapshot::stopped();
@@ -725,12 +602,6 @@ impl DaemonPlayer {
             .map(|episode| episode.slug.clone())
     }
 
-    /// Offers the position the audio thread last published for the loaded episode.
-    ///
-    /// The snapshot holds that position: the one the engine is actually producing audio at.
-    /// Only a settled transport is offered, because a position read while an episode is
-    /// loading or a seek is rebuilding is not yet the episode's own, and the store reads a
-    /// position near the start as a reason to forget the one it has.
     fn record_position(&self) {
         let published = {
             let state = lock(&self.state);
@@ -757,17 +628,12 @@ impl DaemonPlayer {
         );
     }
 
-    /// Records the position and writes it out without waiting for the debounce, for the
-    /// transitions that end playback: pause, stop, and an episode change.
     fn persist_now(&self) {
         self.record_position();
         self.store.flush();
     }
 
-    /// Hands the episode to the audio thread, preferring a complete local copy and
-    /// resuming from the persisted position.
     fn load(&self, episode: &Episode) -> Result<()> {
-        // the outgoing episode's position, while the snapshot still describes it
         self.persist_now();
         let id = episode.id().into_owned();
         let local_path = match cache::state_of(&self.audio_dir, &id) {
@@ -784,7 +650,6 @@ impl DaemonPlayer {
         })
     }
 
-    /// Moves through the catalog from the loaded episode, wrapping at either end.
     fn step(&self, forward: bool) -> Result<()> {
         let catalog = self.catalog()?;
         let current = self.loaded().ok_or(Error::NotPlaying)?;
@@ -806,9 +671,6 @@ impl Player for DaemonPlayer {
         lock(&self.state).clone()
     }
 
-    /// Compared under the lock and never cloned, so the poller's usual answer - nothing
-    /// moved - costs one comparison rather than a deep copy of the snapshot, its favourites
-    /// and its download entries.
     fn moved(&self, previous: &StateSnapshot) -> Moved {
         Moved::between(&lock(&self.state), previous)
     }
@@ -845,8 +707,6 @@ impl Player for DaemonPlayer {
         self.audio.send(AudioCommand::Toggle)
     }
 
-    /// The position is read before the engine is told to stop, because a stopped engine
-    /// publishes no position to read.
     fn stop(&self) -> Result<()> {
         self.persist_now();
         self.audio.send(AudioCommand::Stop)
@@ -864,8 +724,6 @@ impl Player for DaemonPlayer {
             return Err(Error::SeekUnsupported);
         }
 
-        // accepted, not awaited: a streamed rebuild can take seconds, and the client learns
-        // that it landed from the snapshots rather than from this response
         let target_secs = seek::resolve_target(current_secs, position_secs, delta_secs);
         self.audio.send(AudioCommand::Seek { target_secs })
     }
@@ -886,9 +744,6 @@ impl Player for DaemonPlayer {
         self.downloads.cancel(id)
     }
 
-    /// Evicting the episode playing from its local file is refused rather than pulling the
-    /// file out from under the decoder; evicting one that is merely streaming is allowed,
-    /// since the stream owes nothing to the cache.
     fn delete_download<'a>(&'a self, id: &'a str) -> BoxedFuture<'a, Result<()>> {
         Box::pin(async move {
             self.episode(id)?;
@@ -896,10 +751,6 @@ impl Player for DaemonPlayer {
         })
     }
 
-    /// Keyed by [`Episode::id`] rather than by whatever the client named the episode, so a
-    /// favourite lands under the same identifier as that episode's position and is still
-    /// found after a catalog refresh. Mirrored into the snapshot as well as written to disk,
-    /// so a second subscribed client learns of the change from its next push without polling.
     fn set_favourite(&self, id: &str, favourite: bool) -> Result<()> {
         let id = self.episode(id)?.id().into_owned();
         self.store.set_favourite(&id, favourite);
@@ -912,8 +763,6 @@ impl Player for DaemonPlayer {
         self.store.favourites()
     }
 
-    /// Deliberately not mirrored into the snapshot the way favourites are: a preference
-    /// changes when a user presses a key, and nothing subscribed needs it pushed.
     fn preferences(&self, inverted_palette: Option<bool>) -> Preferences {
         if let Some(inverted) = inverted_palette {
             self.store.set_inverted_palette(inverted);
@@ -934,13 +783,12 @@ impl Player for DaemonPlayer {
 
     fn shutdown(&self) {
         self.downloads.shutdown();
-        // before the audio thread is told to stop, for the same reason as `stop`
+
         self.record_position();
         if let Err(error) = self.audio.send(AudioCommand::Shutdown) {
             tracing::warn!(%error, "could not stop the audio thread");
         }
-        // the one place that waits for the disk: the process is about to end, so a write
-        // still on the writer's queue would otherwise be lost
+
         if let Err(error) = self.store.sync() {
             tracing::error!(%error, "could not persist state before exit");
         }
@@ -956,23 +804,18 @@ mod tests {
 
     use crate::state::SessionState;
 
-    /// The debounce the test daemon runs with. Long enough that a state file observed to
-    /// change at all proves the write was immediate rather than debounced.
     const TEST_DEBOUNCE: Duration = Duration::from_secs(3600);
     use serde_json::{Value, json};
     use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
     use super::*;
 
-    /// Long enough that a hang fails the test rather than stalling the suite.
     const PATIENCE: Duration = Duration::from_secs(5);
 
-    /// A player that records what dispatch asked of it and answers immediately.
     struct FakePlayer {
         calls: Mutex<Vec<String>>,
         state: Mutex<StateSnapshot>,
-        /// `None` stands for a daemon that could not load one, which is
-        /// `catalog_unavailable`.
+
         catalog: Mutex<Option<Catalog>>,
         favourites: Mutex<std::collections::BTreeSet<String>>,
         preferences: Mutex<Preferences>,
@@ -1008,7 +851,6 @@ mod tests {
             *lock(&self.state) = state;
         }
 
-        /// Moves the spectrum and nothing else, the only thing that may be rate limited.
         fn set_spectrum(&self, spectrum: Spectrum) {
             lock(&self.state).spectrum = Some(spectrum);
         }
@@ -1115,7 +957,6 @@ mod tests {
         }
     }
 
-    /// A one-episode catalog, enough to assert the wire shape of a `list_catalog` result.
     fn catalog() -> Catalog {
         Catalog {
             info: Vec::new(),
@@ -1139,7 +980,6 @@ mod tests {
         }
     }
 
-    /// A snapshot with everything populated, so completeness assertions are meaningful.
     fn playing() -> StateSnapshot {
         let mut snapshot = StateSnapshot::stopped();
         snapshot.playback = PlaybackState::Playing;
@@ -1217,7 +1057,6 @@ mod tests {
             self.writer.write_all(b"\n").await.unwrap();
         }
 
-        /// The next line, parsed. Fails rather than hanging when nothing arrives.
         async fn recv(&mut self) -> Value {
             let line = tokio::time::timeout(PATIENCE, self.lines.next_line())
                 .await
@@ -1233,12 +1072,6 @@ mod tests {
         }
     }
 
-    /// The state on disk once the daemon's writer has landed something satisfying `settled`.
-    ///
-    /// Persistence runs on a thread of its own so an `fsync` never blocks the runtime, so a
-    /// test asserting that a command wrote *now* waits for the write rather than racing it.
-    /// [`TEST_DEBOUNCE`] is set far beyond this deadline, so a write that waited for the
-    /// debounce still fails the test however loaded the machine.
     fn settles(path: &Path, settled: impl Fn(&SessionState) -> bool) -> SessionState {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -1317,14 +1150,11 @@ mod tests {
         assert_eq!(response["result"]["type"], "ok");
     }
 
-    /// Without a cap the read buffer grows with whatever the client sends, so a client that
-    /// never writes a newline takes the daemon down, and the audio it keeps playing with it.
     #[tokio::test]
     async fn a_request_line_over_the_cap_is_refused_and_the_daemon_survives() {
         let daemon = TestDaemon::start().await;
         let mut client = daemon.client().await;
 
-        // a megabyte and more with no newline anywhere in it
         let flood = vec![b'x'; MAX_REQUEST_BYTES + 4_096];
         client.writer.write_all(&flood).await.unwrap();
         client.writer.write_all(b"\n").await.unwrap();
@@ -1333,20 +1163,15 @@ mod tests {
         assert_eq!(refused["error"]["code"], "invalid_params");
         assert_eq!(refused["id"], Value::Null);
 
-        // and the connection resynchronised rather than closing, so the next request is
-        // answered on the same socket
         let answered = client.request(r#"{"id":7,"cmd":{"type":"status"}}"#).await;
         assert_eq!(answered["id"], 7);
         assert_eq!(answered["result"]["type"], "state");
 
-        // as is one on a socket opened afterwards, which is the daemon still being alive
         let mut fresh = daemon.client().await;
         let served = fresh.request(r#"{"id":8,"cmd":{"type":"status"}}"#).await;
         assert_eq!(served["id"], 8);
     }
 
-    /// The bytes before an oversized line are released as they arrive, so the buffer never
-    /// holds more than one read of a client that never stops writing.
     #[tokio::test]
     async fn an_oversized_line_is_refused_once_however_much_follows_it() {
         let daemon = TestDaemon::start().await;
@@ -1367,15 +1192,11 @@ mod tests {
         assert_eq!(answered["id"], 9);
     }
 
-    /// The read is one arm of a `select!`, so every push falling due while a request is
-    /// half-written drops the future reading it. The bytes it had already taken are out of
-    /// the reader for good, so a partial line kept inside that future would be lost and the
-    /// rest of the request parsed as one of its own.
     #[tokio::test]
     async fn a_request_split_across_the_pushes_that_interrupt_it_is_still_answered() {
         let daemon = TestDaemon::start().await;
         let mut client = daemon.client().await;
-        // subscribed, so the push arm fires on the daemon's own tick throughout
+
         client
             .request(r#"{"id":1,"cmd":{"type":"subscribe"}}"#)
             .await;
@@ -1387,9 +1208,6 @@ mod tests {
         }
         client.writer.write_all(b"\n").await.unwrap();
 
-        // the events the subscription is owed arrive in between; the response is the line
-        // carrying the identifier split across them, and the loop is bounded so a request
-        // that never arrives fails rather than reading events for ever
         let mut answered = None;
         for _ in 0..50 {
             let line = client.recv().await;
@@ -1498,7 +1316,6 @@ mod tests {
         }
         assert_eq!(daemon.player.calls(), expected);
 
-        // the commands that are not transport still answer over the same connection
         let status = client.request(r#"{"id":16,"cmd":{"type":"status"}}"#).await;
         assert_eq!(status["result"]["type"], "state");
         let listed = client
@@ -1601,7 +1418,7 @@ mod tests {
             assert_eq!(event["event"]["type"], "state");
             let state = &event["event"]["state"];
             assert_complete(state);
-            // one event alone renders the whole state
+
             assert_eq!(state["playback"], "playing");
             assert_eq!(state["episode"]["title"], "Episode 79");
             assert_eq!(state["downloads"][0]["slug"], "seventyeight");
@@ -1635,7 +1452,6 @@ mod tests {
             .request(r#"{"id":2,"cmd":{"type":"subscribe"}}"#)
             .await;
 
-        // four ticks' worth of time yields about four events, not eight
         let deadline = tokio::time::Instant::now() + EVENT_TICK * 4;
         let mut events = 0;
         while let Ok(Ok(Some(_))) =
@@ -1686,7 +1502,6 @@ mod tests {
     async fn a_live_daemon_keeps_its_endpoint_and_the_second_process_exits() {
         let daemon = TestDaemon::start().await;
 
-        // what a second daemon process does at startup
         assert!(bind(&daemon.path).unwrap().is_none());
 
         assert!(daemon.path.exists(), "the socket file was disturbed");
@@ -1702,8 +1517,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mfp").join("daemon.sock");
 
-        // a killed daemon leaves the file behind with nothing listening, because a Unix
-        // socket is never unlinked by the process that bound it going away
         drop(bind(&path).unwrap().unwrap());
         assert!(path.exists());
         assert!(std::os::unix::net::UnixStream::connect(&path).is_err());
@@ -1752,10 +1565,8 @@ mod tests {
             "ok"
         );
 
-        // the second client goes away abruptly
         drop(short_lived);
 
-        // the first keeps receiving events and the command took effect for both
         let event = watcher.recv().await;
         assert_eq!(event["event"]["type"], "state");
         assert_eq!(
@@ -1839,7 +1650,6 @@ mod tests {
             "a client did not hold it off"
         );
 
-        // still busy after the client leaves, so the countdown must not start yet
         daemon.player.set_state(playing());
         drop(client);
         tokio::time::sleep(EVENT_TICK * 6).await;
@@ -1855,12 +1665,6 @@ mod tests {
             .unwrap();
     }
 
-    /// The real player over a recording audio engine, a catalog of its own, and a state file
-    /// in a temporary directory.
-    ///
-    /// The engine is the only thing faked: the store, the snapshot, and every persistence
-    /// decision are the daemon's own, which lets a test see whether a position it publishes
-    /// ever reaches the disk.
     fn daemon_player(
         state_path: &Path,
         audio_dir: &Path,
@@ -1873,9 +1677,6 @@ mod tests {
         state_path: &Path,
         audio_dir: &Path,
     ) -> (Arc<DaemonPlayer>, std::sync::mpsc::Receiver<AudioCommand>) {
-        // A debounce far longer than any deadline here, so `settles` returning at all proves
-        // the write did not wait for it. With the real five-second debounce the two windows
-        // are close enough that a loaded machine decides the outcome
         let store = StateStore::with_debounce(state_path.to_path_buf(), TEST_DEBOUNCE);
         let mut restored = StateSnapshot::stopped();
         restored.favourites = store.favourites();
@@ -1897,13 +1698,11 @@ mod tests {
         (Arc::new(player), commands)
     }
 
-    /// A real daemon serving over a real socket, so a test drives the same path a client
-    /// does.
     struct RealDaemon {
         socket: PathBuf,
         player: Arc<DaemonPlayer>,
         serving: tokio::task::JoinHandle<()>,
-        /// Held rather than read: the daemon's commands are only accepted while it lives
+
         _commands: std::sync::mpsc::Receiver<AudioCommand>,
     }
 
@@ -1926,13 +1725,10 @@ mod tests {
             }
         }
 
-        /// What the audio thread would publish as it plays.
         fn publish(&self, state: StateSnapshot) {
             *lock(&self.player.state) = state;
         }
 
-        /// Shuts the daemon down over the wire and waits for it to finish tearing down,
-        /// which is where the final write happens.
         async fn shutdown(self) {
             let mut client = TestClient::connect(&self.socket).await;
             client
@@ -1945,9 +1741,6 @@ mod tests {
         }
     }
 
-    /// Catches a daemon that never feeds its own store: nothing here touches `StateStore`
-    /// until the assertions, and the position is published only while the daemon runs and is
-    /// then withdrawn, so only its periodic recording can have put it on disk.
     #[tokio::test]
     async fn a_position_published_while_playing_is_written_and_resumed_after_a_restart() {
         let directory = tempfile::tempdir().unwrap();
@@ -1956,8 +1749,7 @@ mod tests {
 
         daemon.publish(playing());
         tokio::time::sleep(EVENT_TICK * 3).await;
-        // the episode is over and the engine publishes nothing further, so a daemon that
-        // only looked at its snapshot on the way out would record nothing at all
+
         daemon.publish(StateSnapshot::stopped());
         daemon.shutdown().await;
 
@@ -1969,7 +1761,6 @@ mod tests {
             session.positions
         );
 
-        // and a daemon started afresh over that file resumes the episode there
         let (restarted, commands) = daemon_player(&state_path, &directory.path().join("audio"));
         restarted.play(Some("seventynine")).unwrap();
         let loaded = commands.recv_timeout(PATIENCE).unwrap();
@@ -1979,10 +1770,6 @@ mod tests {
         }
     }
 
-    /// The two halves have to agree on the key: a position is recorded under the identifier
-    /// the snapshot carries and looked up under `Episode::id()`. An episode enrichment never
-    /// reached has no slug, so it is where they would part company, leaving a position
-    /// written but never found again.
     #[tokio::test]
     async fn a_position_for_an_episode_without_a_slug_is_recorded_and_found_again() {
         let directory = tempfile::tempdir().unwrap();
@@ -2000,7 +1787,7 @@ mod tests {
         };
 
         let (player, _commands) = daemon_player_with(catalog.clone(), &state_path, &audio_dir);
-        // published exactly as the audio thread publishes it, by `Episode::id()`
+
         let mut state = playing();
         state.episode = Some(EpisodeRef {
             slug: episode.id().into_owned(),
@@ -2024,10 +1811,6 @@ mod tests {
         }
     }
 
-    /// The poller asks what moved rather than taking a snapshot, so the poll that finds
-    /// nothing owed - at [`PUSH_POLL`] almost all of them - neither allocates nor holds the
-    /// lock the audio thread is writing. An override that drifted from the snapshot would
-    /// stop pushing a field, silently, which is exactly what the default answer catches.
     #[tokio::test]
     async fn what_the_poller_is_told_moved_is_what_the_snapshot_says_moved() {
         let directory = tempfile::tempdir().unwrap();
@@ -2050,7 +1833,6 @@ mod tests {
         }
     }
 
-    /// A snapshot differing from `state` in the spectrum and in nothing else.
     fn spectrum_only(state: &StateSnapshot) -> StateSnapshot {
         let mut moved = state.clone();
         moved.spectrum = Some(Spectrum(vec![128; SPECTRUM_BINS]));
@@ -2067,7 +1849,6 @@ mod tests {
         daemon.publish(playing());
         client.request(r#"{"id":1,"cmd":{"type":"pause"}}"#).await;
 
-        // on disk already, rather than five seconds from now
         let session = settles(&state_path, |session| {
             session.positions.contains_key("seventynine")
         });
@@ -2075,8 +1856,6 @@ mod tests {
         drop(client);
         daemon.shutdown().await;
     }
-
-    // == Favourites ==
 
     #[tokio::test]
     async fn list_favourites_answers_with_the_set_the_player_holds() {
@@ -2224,7 +2003,6 @@ mod tests {
             .request(r#"{"id":2,"cmd":{"type":"favourite","slug":"seventynine"}}"#)
             .await;
 
-        // never asked for it: the change arrives on the subscription alone
         let mut seen = None;
         for _ in 0..20 {
             let event = watching.recv().await;
@@ -2253,7 +2031,6 @@ mod tests {
             .request(r#"{"id":1,"cmd":{"type":"favourite","slug":"seventynine"}}"#)
             .await;
 
-        // on disk already, rather than at shutdown
         let session = settles(&state_path, |session| {
             session.favourites.contains("seventynine")
         });
@@ -2276,10 +2053,9 @@ mod tests {
         let audio_dir = directory.path().join("audio");
         let (player, _commands) = daemon_player(&state_path, &audio_dir);
         player.set_favourite("seventynine", true).unwrap();
-        // dropped rather than left running, so the file is complete before it is reread
+
         drop(player);
 
-        // what a refresh from upstream leaves: the same episode, fetched and retitled
         let mut refreshed = catalog();
         refreshed.fetched_at = 1_800_000_000;
         refreshed.episodes[0].title = "79: Corticyte".into();
@@ -2291,8 +2067,6 @@ mod tests {
             vec!["seventynine".to_owned()]
         );
     }
-
-    // == Interface Preferences ==
 
     #[tokio::test]
     async fn preferences_default_to_the_default_palette() {
@@ -2310,8 +2084,6 @@ mod tests {
         daemon.shutdown().await;
     }
 
-    /// The cookie notice is gone and so is the preference recording its dismissal. A client
-    /// built before that still names the field, and must be answered rather than refused.
     #[tokio::test]
     async fn a_client_still_sending_the_dismissed_notice_is_answered_rather_than_refused() {
         let directory = tempfile::tempdir().unwrap();
@@ -2326,9 +2098,9 @@ mod tests {
 
         assert_eq!(answered["error"], Value::Null, "{answered}");
         assert_eq!(answered["result"]["type"], "preferences");
-        // the preference it did name was still applied
+
         assert_eq!(answered["result"]["preferences"]["inverted_palette"], true);
-        // and the one it named that no longer exists is answered with nothing at all
+
         assert_eq!(
             answered["result"]["preferences"]["notice_dismissed"],
             Value::Null
@@ -2349,7 +2121,6 @@ mod tests {
             .await;
         assert_eq!(set["result"]["preferences"]["inverted_palette"], true);
 
-        // on disk already, rather than at shutdown
         let session = settles(&state_path, |session| session.preferences.inverted_palette);
         assert!(session.preferences.inverted_palette);
         drop(client);
@@ -2364,8 +2135,6 @@ mod tests {
         );
     }
 
-    /// They are the interface's own: setting one must not disturb what is playing, and must
-    /// not appear in the snapshot every subscriber is pushed.
     #[tokio::test]
     async fn a_preference_touches_neither_playback_nor_the_snapshot() {
         let directory = tempfile::tempdir().unwrap();
@@ -2389,9 +2158,6 @@ mod tests {
         daemon.shutdown().await;
     }
 
-    // == The spectrum push ==
-
-    /// Everything one subscribed client is pushed until `deadline`.
     async fn events_until(client: &mut TestClient, deadline: tokio::time::Instant) -> Vec<Value> {
         let mut events = Vec::new();
         while let Ok(Ok(Some(line))) =
@@ -2402,7 +2168,6 @@ mod tests {
         events
     }
 
-    /// Moves the spectrum far faster than the cap and changes nothing else at all.
     fn animate(player: Arc<FakePlayer>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             for frame in 0..1_000u32 {
@@ -2433,10 +2198,8 @@ mod tests {
         );
         moving.abort();
 
-        // the second client, which opted out, is pushed the fixed tick and nothing else, so
-        // everything the first one got beyond that is exactly what the spectrum caused
         let caused_by_the_spectrum = drawn.len().saturating_sub(ticked.len());
-        // one second's worth at the cap, plus the frame that lands on the boundary
+
         assert!(
             caused_by_the_spectrum <= 21,
             "{caused_by_the_spectrum} spectrum snapshots in one second ({} and {})",
@@ -2476,8 +2239,6 @@ mod tests {
         moving.abort();
 
         for events in [&one, &two] {
-            // a second's worth at the cap, the fixed tick alongside it, and the frame that
-            // lands on the boundary
             assert!(
                 events.len() <= 25,
                 "{} snapshots in one second with two clients attached",
@@ -2492,13 +2253,10 @@ mod tests {
         );
     }
 
-    /// The fixed tick is unconditional, and a spectrum moving at its cap is what would starve
-    /// it if the two shared one gap: a connection that opted out counts none of those pushes,
-    /// so it would be pushed nothing at all.
     #[tokio::test]
     async fn the_fixed_tick_survives_a_spectrum_that_never_stops_moving() {
         let daemon = TestDaemon::start().await;
-        // every other field held completely still, so nothing but the tick can push
+
         daemon.player.set_state(playing());
         let mut ticking = daemon.client().await;
         ticking
@@ -2537,8 +2295,6 @@ mod tests {
             .request(r#"{"id":1,"cmd":{"type":"subscribe","spectrum":true}}"#)
             .await;
 
-        // spend the spectrum's slot immediately before pausing, so a gate that also held
-        // other changes back would be at its least forgiving here
         daemon.player.set_spectrum(Spectrum::silent());
         client.recv().await;
         let mut paused = playing();
@@ -2586,7 +2342,7 @@ mod tests {
             "the analyser was not fed: {}",
             drawn.len()
         );
-        // the fixed tick over four of them and nothing on top: every spectrum push withheld
+
         assert!(
             (3..=6).contains(&ignored.len()),
             "a client that opted out was pushed {} snapshots",
@@ -2605,7 +2361,6 @@ mod tests {
             );
         }
 
-        // and it is still pushed everything else
         let mut stopped = playing();
         stopped.playback = PlaybackState::Paused;
         daemon.player.set_state(stopped);

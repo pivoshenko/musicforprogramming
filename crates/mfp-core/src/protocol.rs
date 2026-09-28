@@ -1,31 +1,20 @@
-//! The newline-delimited JSON wire protocol. This module is its definition.
-//!
-//! One JSON value per line in both directions. A client writes [`Request`] lines and reads
-//! [`Frame`] lines, each either a [`Response`] echoing a request's `id` or an unsolicited
-//! [`EventFrame`] carrying a full [`StateSnapshot`].
-//!
-//! Field names and value spellings are the contract: new fields may be added and readers
-//! must ignore ones they do not recognise, but nothing already named may be renamed or
-//! respelled.
+//! The newline-delimited JSON wire protocol, one value per line in both directions.
+//! Names are contract: fields may be added, but nothing named may be renamed or respelled.
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::model::Catalog;
 
-/// One request line: `{"id":1,"cmd":{"type":"pause"}}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Request {
-    /// A client-chosen number the response echoes.
     pub id: i64,
     pub cmd: Command,
 }
 
-/// The command surface the daemon accepts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
-    /// Start the named episode, or resume the loaded one when no slug is given.
     Play {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slug: Option<String>,
@@ -33,6 +22,7 @@ pub enum Command {
     Pause,
     Toggle,
     Stop,
+
     /// Seek to an absolute position or by a signed offset. Exactly one of the two.
     Seek {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -42,61 +32,50 @@ pub enum Command {
     },
     Next,
     Previous,
-    /// Begin or resume an offline download; returns before the transfer finishes.
+
     Download {
         slug: String,
     },
     CancelDownload {
         slug: String,
     },
-    /// Remove an episode's local copy, so no client has to unlink a file the daemon is
-    /// accounting for.
+
     DeleteDownload {
         slug: String,
     },
-    /// Mark an episode a favourite. Marking one already marked is not an error.
+
+    /// Marking an episode already marked is not an error.
     Favourite {
         slug: String,
     },
-    /// Unmark a favourite. Unmarking one not marked is not an error.
+
+    /// Unmarking an episode not marked is not an error.
     Unfavourite {
         slug: String,
     },
     ListFavourites,
-    /// Read the interface's display preferences, and set whichever of them are given.
-    ///
-    /// One command rather than a read and a write: an omitted field is left alone, so a
-    /// read is this command with the field absent and a client never has to read a
-    /// preference back before changing it. These belong to the interface, not to playback,
-    /// and setting one has no effect on what the daemon is playing.
-    ///
-    /// Unknown fields are ignored, so a client still sending the cookie notice's
-    /// dismissal - a preference this interface no longer has - is answered rather than
-    /// refused.
+
+    /// Reads the interface's display preferences and sets whichever are given: an omitted
+    /// field is left alone, so a read is this command with no field at all.
     Preferences {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inverted_palette: Option<bool>,
     },
     Status,
-    /// Return the catalog the daemon holds, so no client has to read its cache file.
+
     ListCatalog,
-    /// Start receiving pushed state events on this connection.
+
     Subscribe {
-        /// Whether this connection wants snapshots pushed for spectrum changes.
-        ///
-        /// Defaults to false so a client that does not draw an analyser is never woken
-        /// twenty times a second for a field it ignores.
+        /// Defaults to false, so a client drawing no analyser is never woken twenty times a second.
         #[serde(default)]
         spectrum: bool,
     },
-    /// Stop audio, persist state, and exit. The only command that ends the process.
+
     Shutdown,
 }
 
-/// Every `cmd.type` spelling the daemon recognises.
-///
-/// Used to tell an unrecognised command from a recognised one with bad arguments, which
-/// the spec answers with different codes.
+/// Every `cmd.type` the daemon recognises, which tells an unrecognised command from a
+/// recognised one with bad arguments.
 pub const COMMAND_TYPES: &[&str] = &[
     "play",
     "pause",
@@ -142,11 +121,7 @@ impl Command {
         }
     }
 
-    /// Checks arguments that parsed structurally but must still fall inside their permitted
-    /// domain.
-    ///
-    /// `seek` takes exactly one of `position_secs` or `delta_secs`, and that one must be a
-    /// duration the engine can hold. Anything else is [`ErrorCode::InvalidParams`].
+    /// Checks arguments that parsed structurally but must still fall inside their domain.
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Seek {
@@ -164,17 +139,11 @@ impl Command {
     }
 }
 
-/// The exclusive bound on a seek, in seconds.
-///
-/// A seek becomes a [`std::time::Duration`] in the audio engine, and
-/// `Duration::from_secs_f64` panics at or above 2^64 seconds and on a NaN, taking the audio
-/// thread down for the rest of the process. The domain is refused here instead.
+/// `Duration::from_secs_f64` panics at or above this and on a NaN, taking the audio thread
+/// down for the rest of the process, so the domain is refused here instead.
 const SEEK_SECS_LIMIT: f64 = u64::MAX as f64;
 
-/// Whether a seek argument is a duration the engine can hold.
 fn seek_within_range(value: f64, minimum: f64) -> Result<()> {
-    // both comparisons are false for a NaN, which is the point: it is as fatal to the
-    // engine as an out-of-range magnitude
     if value >= minimum && value < SEEK_SECS_LIMIT {
         return Ok(());
     }
@@ -183,8 +152,7 @@ fn seek_within_range(value: f64, minimum: f64) -> Result<()> {
     )))
 }
 
-/// One response line. Carries exactly one of `result` or `error`, and echoes the
-/// request's `id`, or `null` when the id could not be recovered from the line.
+/// One response line, carrying exactly one of `result` or `error`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Response {
     pub id: Option<i64>,
@@ -195,7 +163,6 @@ pub struct Response {
 }
 
 impl Response {
-    /// A successful response carrying `{"type":"ok"}`.
     pub fn ok(id: i64) -> Self {
         Self {
             id: Some(id),
@@ -220,8 +187,7 @@ impl Response {
         }
     }
 
-    /// A failure response. `id` is `None` when the request line was too malformed to
-    /// recover one from.
+    /// `id` is `None` when the request line was too malformed to recover one from.
     pub fn failure(id: Option<i64>, error: &Error) -> Self {
         Self {
             id,
@@ -241,11 +207,6 @@ pub enum ResultBody {
     Preferences { preferences: Preferences },
 }
 
-/// The interface's own display preferences.
-///
-/// Recorded beside playback positions and favourites rather than in a second store of the
-/// interface's own, but not part of [`StateSnapshot`]: they change when a user presses a
-/// key, not while audio plays, and nothing subscribed needs them pushed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -274,15 +235,13 @@ impl From<Error> for ErrorObject {
     }
 }
 
-/// One event line: `{"event":{"type":"state","state":{...}}}`. Events carry no `id`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventFrame {
     pub event: Event,
 }
 
-///
-/// The size difference between the two variants buys nothing to box away: an event is
-/// built, serialised, and dropped, and never held in bulk.
+/// The size difference between the variants buys nothing to box away: an event is built,
+/// serialised, and dropped, and never held in bulk.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -291,14 +250,14 @@ pub enum Event {
     State {
         state: StateSnapshot,
     },
+
     /// An event kind this release does not know, which a newer daemon pushed.
     #[serde(other)]
     Unknown,
 }
 
-/// One line read from the daemon, which is either a response or a pushed event.
-///
-/// Events are tried first: an event line has an `event` field and no response has one.
+/// One line read from the daemon. Events are tried first: an event line has an `event`
+/// field and no response has one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Frame {
@@ -306,7 +265,6 @@ pub enum Frame {
     Response(Response),
 }
 
-/// What playback is doing right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -315,38 +273,36 @@ pub enum PlaybackState {
     Loading,
     Playing,
     Paused,
-    /// A seek has been accepted and audio has not yet resumed at the target. Distinct from
-    /// every other state so a client never shows a position that does not correspond to
-    /// audible audio.
+
+    /// A seek is accepted and audio has not resumed at the target yet, so no client ever
+    /// shows a position that does not correspond to audible audio.
     Seeking,
     Error,
-    /// A state this release does not know, which a newer daemon reported.
+
+    /// A spelling this release does not know, which a newer daemon reported.
     #[serde(other)]
     Unknown,
 }
 
-/// Where the audio for the loaded episode is coming from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Source {
     Stream,
     Local,
-    /// A source this release does not know, which a newer daemon reported.
+
+    /// A spelling this release does not know, which a newer daemon reported.
     #[serde(other)]
     Unknown,
 }
 
-/// The loaded episode, as much of it as a snapshot needs to name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EpisodeRef {
-    /// The episode's stable identifier, as [`crate::model::Episode::id`] derives it.
     pub slug: String,
     pub title: String,
     pub duration_secs: f64,
 }
 
-/// What a download is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -356,60 +312,46 @@ pub enum DownloadState {
     Completed,
     Failed,
     Cancelled,
-    /// A state this release does not know, which a newer daemon reported.
+
+    /// A spelling this release does not know, which a newer daemon reported.
     #[serde(other)]
     Unknown,
 }
 
-/// One entry in a snapshot's `downloads` array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub slug: String,
     pub downloaded_bytes: u64,
-    /// The byte length the feed declares for the enclosure.
+
     pub total_bytes: u64,
     pub state: DownloadState,
+
     /// Populated only when `state` is `failed`.
     pub error: Option<ErrorObject>,
 }
 
-/// How many frequency bins a [`Spectrum`] carries.
-///
-/// One per bin of a 2048-point FFT, which is what Web Audio's default `fftSize` yields and
-/// therefore what the site's analyser is calibrated against.
+/// One per bin of a 2048-point transform, which is Web Audio's default `fftSize` and so
+/// what the site's own analyser is calibrated against.
 pub const SPECTRUM_BINS: usize = 1024;
 
-/// The lower bound of the decibel range a [`Spectrum`] maps onto `0..=255`.
 pub const SPECTRUM_MIN_DB: f32 = -114.0;
 
-/// The upper bound of the decibel range a [`Spectrum`] maps onto `0..=255`.
 pub const SPECTRUM_MAX_DB: f32 = -30.0;
 
-/// The exponential smoothing applied against the previous frame.
 pub const SPECTRUM_SMOOTHING: f32 = 0.666;
 
-/// A frequency spectrum of the audio currently being played.
-///
-/// Each byte is one bin's magnitude in decibels, scaled linearly from [`SPECTRUM_MIN_DB`]
-/// to [`SPECTRUM_MAX_DB`] onto `0..=255` and clamped - the same contract as Web Audio's
-/// `getByteFrequencyData`, so a client can run the site's own mapping arithmetic unchanged.
-/// Bins run from lowest frequency to highest.
-///
-/// Carried base64-encoded rather than as an array of 1024 numbers: roughly 1.4 KB per
-/// snapshot instead of 4 KB, and the snapshot stays readable.
+/// One bin per byte, scaled linearly from [`SPECTRUM_MIN_DB`] to [`SPECTRUM_MAX_DB`] onto
+/// `0..=255` exactly as Web Audio's `getByteFrequencyData`. Carried base64-encoded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spectrum(pub Vec<u8>);
 
 impl Spectrum {
-    /// A spectrum reporting no signal in any bin.
     pub fn silent() -> Self {
         Self(vec![0; SPECTRUM_BINS])
     }
 
-    /// The bin at `index`, or 0 when the index is past the end.
-    ///
-    /// Not an error: the client's bin table is fixed while the length here is a wire value,
-    /// so a short frame reads as silence rather than panicking mid-draw.
+    /// Reads 0 past the end rather than panicking: the client's bin table is fixed while the
+    /// length here is a wire value.
     pub fn bin(&self, index: usize) -> u8 {
         self.0.get(index).copied().unwrap_or(0)
     }
@@ -438,42 +380,36 @@ impl<'de> Deserialize<'de> for Spectrum {
     }
 }
 
-/// The complete player state.
-///
-/// Every event carries one of these in full; the protocol defines no deltas, so a client
-/// that discards everything it has seen can still render from the next snapshot alone.
+/// The complete player state. The protocol defines no deltas, so a client that discards
+/// everything it has seen can still render from the next snapshot alone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct StateSnapshot {
     pub playback: PlaybackState,
     pub episode: Option<EpisodeRef>,
-    /// The position of the audio actually being produced. Never reset or left stale by a
-    /// seek, and never advanced past what is audible.
+
+    /// The position of the audio actually being produced. Never reset or left stale by a seek,
+    /// and never advanced past what is audible.
     pub position_secs: f64,
-    /// The target of the outstanding seek, and `null` when no seek is outstanding. At
-    /// most one seek is outstanding at a time; a later seek supersedes an earlier one.
+
     pub seek_target_secs: Option<f64>,
     pub duration_secs: Option<f64>,
+
     /// True while `duration_secs` comes from the feed rather than from decoding.
     pub duration_approximate: bool,
     pub seekable: bool,
     pub source: Option<Source>,
     pub downloads: Vec<DownloadProgress>,
-    /// Every episode the listener has marked a favourite, by episode identifier.
+
     #[serde(default)]
     pub favourites: Vec<String>,
-    /// The spectrum of the audio being played.
-    ///
-    /// Absent when nothing is loaded, when playback is paused or stopped, and while a seek
-    /// is in flight, so a client can tell "no audio to analyse" from "silence in the
-    /// audio". A client that ignores it is unaffected by its presence.
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spectrum: Option<Spectrum>,
     pub error: Option<ErrorObject>,
 }
 
 impl StateSnapshot {
-    /// A snapshot with nothing loaded.
     pub fn stopped() -> Self {
         Self {
             playback: PlaybackState::Stopped,
@@ -492,17 +428,13 @@ impl StateSnapshot {
     }
 }
 
-/// A request line that could not be turned into a [`Request`], together with the response
-/// the daemon owes for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestError {
-    /// The request's id where it could be recovered from the line, and `None` otherwise.
     pub id: Option<i64>,
     pub error: ErrorObject,
 }
 
 impl RequestError {
-    /// The response line to write back. The connection stays open either way.
     pub fn response(&self) -> Response {
         Response {
             id: self.id,
@@ -512,12 +444,8 @@ impl RequestError {
     }
 }
 
-/// Parses one request line, telling a malformed line from an unrecognised command from bad
-/// arguments, each of which the spec answers with a different code.
-///
-/// Not JSON, not an object, or missing `id` or `cmd` is [`ErrorCode::InvalidRequest`] with
-/// `id` `null`; an unrecognised `cmd.type` is [`ErrorCode::UnknownCommand`]; anything else
-/// is [`ErrorCode::InvalidParams`].
+/// A malformed line is [`ErrorCode::InvalidRequest`] with a `null` id, an unrecognised
+/// `cmd.type` is [`ErrorCode::UnknownCommand`], and bad arguments [`ErrorCode::InvalidParams`].
 pub fn parse_request(line: &str) -> std::result::Result<Request, RequestError> {
     fn reject(id: Option<i64>, error: Error) -> RequestError {
         RequestError {
@@ -625,11 +553,6 @@ mod tests {
         );
     }
 
-    /// What a snapshot costs to copy and to put on the wire.
-    ///
-    /// The measured baseline, so a regression shows up as a number rather than a hunch:
-    /// 231 ns to clone and 1 us to serialise, for a line of 1732 bytes. The daemon pushes
-    /// twenty a second, so the serialise is 0.002% of a core.
     #[test]
     #[ignore = "benchmark, run explicitly"]
     fn bench_snapshot_wire_cost() {
@@ -765,8 +688,6 @@ mod tests {
         assert_eq!(serde_json::from_str::<ResultBody>(&json).unwrap(), body);
     }
 
-    /// Reading is the command with no field, which must therefore be the wire default, not
-    /// something a client has to spell out.
     #[test]
     fn preferences_with_no_field_is_a_read_and_omits_it_on_the_wire() {
         let request = parse_request(r#"{"id":1,"cmd":{"type":"preferences"}}"#).unwrap();
@@ -781,9 +702,6 @@ mod tests {
         assert!(!json.contains("inverted_palette"), "{json}");
     }
 
-    /// The cookie notice is gone and so is the preference recording its dismissal. A client
-    /// too old to know that must still be answered rather than refused, which is serde's
-    /// default for an unknown field - verified here rather than assumed.
     #[test]
     fn a_client_still_sending_the_dismissed_notice_is_parsed_rather_than_refused() {
         let request = parse_request(
@@ -803,8 +721,6 @@ mod tests {
         assert!(preferences.inverted_palette);
     }
 
-    /// Absent preferences are the defaults, which is what a daemon never told otherwise
-    /// reports.
     #[test]
     fn absent_preferences_deserialise_to_the_defaults() {
         let preferences: Preferences = serde_json::from_str("{}").unwrap();
@@ -881,8 +797,6 @@ mod tests {
 
     #[test]
     fn a_snapshot_from_an_older_daemon_still_deserialises() {
-        // an older daemon's line carries volume and muted; a newer client must read the rest
-        // of it rather than fail on two fields it no longer knows
         let json = r#"{
             "playback": "playing",
             "episode": null,
@@ -911,8 +825,6 @@ mod tests {
 
     #[test]
     fn volume_is_no_longer_a_command_the_daemon_knows() {
-        // loudness belongs to the operating system's mixer, and a caller written against the
-        // older surface must fail loudly rather than believe it changed something
         for line in [
             r#"{"id":1,"cmd":{"type":"volume"}}"#,
             r#"{"id":1,"cmd":{"type":"volume","level":0.5}}"#,
@@ -932,8 +844,6 @@ mod tests {
 
     #[test]
     fn a_seek_the_audio_engine_could_not_hold_is_invalid_params() {
-        // 1e20 seconds is past what `Duration::from_secs_f64` accepts, and it reached the
-        // engine unchecked before this was validated
         for line in [
             r#"{"id":1,"cmd":{"type":"seek","position_secs":1e20}}"#,
             r#"{"id":1,"cmd":{"type":"seek","position_secs":-1.0}}"#,
@@ -950,7 +860,6 @@ mod tests {
         }
     }
 
-    /// JSON writes neither, so these reach `validate` only from a caller built in process.
     #[test]
     fn a_seek_to_a_non_finite_position_is_invalid_params() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
@@ -986,9 +895,6 @@ mod tests {
         );
     }
 
-    /// `COMMAND_TYPES` is what `parse_request` gates on, and it is maintained by hand. A
-    /// variant missing from it is answered `unknown_command` by a daemon that implements it,
-    /// with nothing else to catch the drift.
     #[test]
     fn every_command_variant_is_named_in_command_types() {
         let every_variant = [
@@ -1041,8 +947,6 @@ mod tests {
         );
     }
 
-    /// The protocol carries no version, so an added spelling must cost a client that one
-    /// value rather than the whole line.
     #[test]
     fn a_snapshot_spelling_this_release_does_not_know_reads_as_unknown() {
         let mut json = serde_json::to_value(snapshot()).unwrap();
@@ -1055,7 +959,7 @@ mod tests {
         assert_eq!(snapshot.playback, PlaybackState::Unknown);
         assert_eq!(snapshot.source, Some(Source::Unknown));
         assert_eq!(snapshot.downloads[0].state, DownloadState::Unknown);
-        // everything beside the three unknown spellings still arrived
+
         assert_eq!(snapshot.position_secs, 1800.0);
         assert_eq!(snapshot.episode.unwrap().slug, "seventynine");
     }

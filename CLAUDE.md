@@ -144,8 +144,12 @@ run against a scratch instance.
 
 ## Conventions
 
-- Every module opens with a `//!` doc comment stating what it owns and, where the answer is not
-  obvious, why it is built that way. The existing ones carry real constraints; keep that bar
+- The source carries no explanatory comments. Three exceptions are load-bearing and must stay: the
+  `///` lines on the `clap` subcommand enums in `mfp-tui/src/cli.rs`, which are what `mfp --help`
+  prints, the `// SAFETY:` line above every `unsafe` block, which the workspace's
+  `undocumented_unsafe_blocks = "deny"` requires, and the doc comments on `mfp-core`'s public API,
+  which is a published surface. Those are one or two lines each and state only what the signature
+  cannot: units, failure modes, wire-contract invariants, and why a non-obvious choice was made
 - The workspace lint set in `Cargo.toml` is deliberately narrow: lints that catch a defect, not lints
   that enforce a house style. The pedantic and nursery groups are off on purpose
 - `unwrap`, `expect`, `panic`, and `float_cmp` are denied in production code and re-allowed per crate

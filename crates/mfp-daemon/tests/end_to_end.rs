@@ -1,14 +1,3 @@
-//! The daemon as a process.
-//!
-//! Everything else in the suite runs the daemon in-process, with the audio device as its
-//! one stand-in. This drives the built binary: its own socket, state file and caches, a
-//! real episode streamed from upstream, and the state file read back as a user would.
-//!
-//! It reaches the network and needs an audio output device, so like the other tests that
-//! touch the real world it is not run by default:
-//! `cargo test -p mfp-daemon --test end_to_end -- --ignored --nocapture`.
-
-// An integration test is its own crate, so the library's cfg(test) exemption does not reach it
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -24,28 +13,20 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-/// Generous: starting the daemon fetches the catalog, and a distant seek in a streamed
-/// source is measured to take up to eleven seconds.
 const PATIENCE: Duration = Duration::from_secs(90);
 
-/// Far enough in that the store's 30-second start margin does not apply, and a position
-/// no episode would reach on its own during the test.
 const TARGET_SECS: f64 = 1_200.0;
 
-/// A daemon process with every path it uses inside one directory.
 struct Daemon {
     process: Child,
     socket: PathBuf,
 }
 
 impl Daemon {
-    /// Starts the daemon and waits until it answers on its socket.
     fn start(root: &Path) -> Self {
         let socket = root.join("daemon.sock");
         let process = Command::new(env!("CARGO_BIN_EXE_mfp-daemon"))
             .env("MFP_SOCKET", &socket)
-            // the MFP_* overrides are used exactly as given, with no `mfp` appended,
-            // and they are the only way to scope an instance: the socket alone is not
             .env("MFP_STATE_DIR", root.join("state"))
             .env("MFP_CACHE_DIR", root.join("cache"))
             .env("MFP_CONFIG_DIR", root.join("config"))
@@ -66,7 +47,6 @@ impl Daemon {
         Client::connect(&self.socket)
     }
 
-    /// Shuts the daemon down over the wire, then waits for the exit that does the final write.
     fn shutdown(mut self) {
         self.client()
             .request(r#"{"id":99,"cmd":{"type":"shutdown"}}"#);
@@ -83,7 +63,6 @@ impl Daemon {
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        // a test that failed mid-flight must not leave a daemon holding the audio device
         let _ = self.process.kill();
         let _ = self.process.wait();
     }
@@ -119,7 +98,6 @@ impl Client {
         self.request(r#"{"id":1,"cmd":{"type":"status"}}"#)["result"]["state"].clone()
     }
 
-    /// Polls status until it satisfies `settled`, returning the snapshot that did.
     fn settle(&mut self, what: &str, settled: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + PATIENCE;
         loop {
@@ -140,7 +118,6 @@ fn position(status: &Value) -> f64 {
     status["position_secs"].as_f64().unwrap()
 }
 
-/// The identifier of an episode long enough that the target sits well inside it.
 fn a_long_episode(client: &mut Client) -> String {
     let catalog = client.request(r#"{"id":2,"cmd":{"type":"list_catalog"}}"#);
     let episodes = catalog["result"]["catalog"]["episodes"]
@@ -164,8 +141,6 @@ fn session(root: &Path) -> Value {
     serde_json::from_str(&text).unwrap()
 }
 
-/// The whole of the defect this suite exists for, at the level a user meets it: play,
-/// move somewhere worth resuming from, shut the daemon down, and start it again.
 #[test]
 #[ignore = "spawns the daemon binary: needs an audio output device, reaches the network, and is audible -- the player has no volume of its own, so turn the system volume down first"]
 fn a_position_reached_in_one_run_is_written_to_disk_and_resumed_in_the_next() {
@@ -186,7 +161,7 @@ fn a_position_reached_in_one_run_is_written_to_disk_and_resumed_in_the_next() {
     let reached = client.settle("the seek to land", |status| {
         status["playback"] == "playing" && position(status) >= TARGET_SECS
     });
-    // long enough that the recording is the daemon's periodic one and not a coincidence
+
     std::thread::sleep(Duration::from_secs(2));
     drop(client);
     daemon.shutdown();
@@ -202,7 +177,6 @@ fn a_position_reached_in_one_run_is_written_to_disk_and_resumed_in_the_next() {
     );
     assert_eq!(session["last_played"], id.as_str());
 
-    // and the next run starts the episode there rather than at the beginning
     let restarted = Daemon::start(root.path());
     let mut client = restarted.client();
     client.request(&format!(
