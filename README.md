@@ -45,7 +45,10 @@ cargo install --path crates/mfp-tui
 
 Both binaries must be on `PATH`: `mfp` autostarts `mfp-daemon` when nothing is listening on the socket, looking for it beside itself and then on `PATH`. `$MFP_DAEMON` overrides that.
 
-### Herdr
+<h3 align="left">
+  <img src="https://github.com/herdrdev/herdr/raw/master/assets/logo.png" alt="" height="28" align="left" />
+  Herdr
+</h3>
 
 [`plugins/herdr/mfp.player`](plugins/herdr/mfp.player) is a [Herdr](https://herdr.dev) plugin that opens the interface as a pane and puts the transport on actions.
 
