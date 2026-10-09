@@ -8,6 +8,9 @@ use std::time::Duration;
 use mfp_core::Episode;
 use mfp_core::error::{Error, ErrorCode, Result};
 use mfp_core::protocol::{EpisodeRef, ErrorObject, PlaybackState, Source};
+use rodio::Source as _;
+use rodio::mixer::Mixer;
+use rodio::source::SquareWave;
 
 use super::seek::{self, SeekPlan};
 use super::source::{SampleTap, Tap};
@@ -17,6 +20,12 @@ use crate::state::SharedState;
 const TICK: Duration = Duration::from_millis(100);
 
 const ANALYSIS_INTERVAL: Duration = Duration::from_millis(50);
+
+const CLICK_HZ: f32 = 5_555.0;
+
+const CLICK_GAIN: f32 = 0.125;
+
+const CLICK_LENGTH: Duration = Duration::from_millis(20);
 
 #[derive(Debug)]
 pub enum AudioCommand {
@@ -106,6 +115,8 @@ impl AudioEngine {
 struct Output {
     player: rodio::Player,
 
+    effects: Option<Mixer>,
+
     _sink: Option<rodio::MixerDeviceSink>,
 }
 
@@ -121,6 +132,7 @@ impl Output {
         let player = rodio::Player::connect_new(sink.mixer());
         Ok(Self {
             player,
+            effects: Some(sink.mixer().clone()),
             _sink: Some(sink),
         })
     }
@@ -144,9 +156,22 @@ impl Output {
             })?;
         Ok(Self {
             player,
+            effects: None,
             _sink: None,
         })
     }
+
+    fn click(&self) {
+        if let Some(effects) = &self.effects {
+            effects.add(click());
+        }
+    }
+}
+
+fn click() -> impl rodio::Source + Send {
+    SquareWave::new(CLICK_HZ)
+        .amplify(CLICK_GAIN)
+        .take_duration(CLICK_LENGTH)
 }
 
 struct Analysis {
@@ -317,6 +342,9 @@ impl Engine {
                 None
             }
             AudioCommand::Stop => {
+                if self.loaded.is_some() {
+                    self.output.click();
+                }
                 self.release();
                 None
             }
@@ -348,6 +376,7 @@ impl Engine {
         start_secs: f64,
         requests: &Receiver<AudioCommand>,
     ) -> Option<AudioCommand> {
+        self.output.click();
         self.discard_chain();
         self.error = None;
         self.seek_target_secs = None;
@@ -398,6 +427,7 @@ impl Engine {
             self.fail(&Error::SeekUnsupported);
             return None;
         }
+        self.output.click();
 
         let SeekOutcome::At(target) = self.resolve(target_secs) else {
             self.release();
@@ -550,6 +580,9 @@ impl Engine {
     fn set_paused(&mut self, paused: bool) {
         if self.loaded.is_none() {
             return;
+        }
+        if self.want_paused != paused {
+            self.output.click();
         }
         self.want_paused = paused;
         if paused {
@@ -775,6 +808,18 @@ mod tests {
         assert_eq!(reported_position(3600.0, Duration::ZERO), 3600.0);
         assert_eq!(reported_position(3600.0, Duration::from_secs(60)), 3660.0);
         assert_eq!(reported_position(0.0, Duration::from_secs(12)), 12.0);
+    }
+
+    #[test]
+    fn the_click_is_the_sites_twenty_millisecond_square_tick() {
+        let tick = click();
+        assert_eq!(tick.channels().get(), 1);
+
+        let samples: Vec<_> = tick.collect();
+        assert_eq!(samples.len(), 960);
+        assert!(samples.iter().all(|sample| sample.abs() <= CLICK_GAIN + f32::EPSILON));
+        assert!(samples.iter().any(|sample| *sample > 0.0));
+        assert!(samples.iter().any(|sample| *sample < 0.0));
     }
 
     #[test]
