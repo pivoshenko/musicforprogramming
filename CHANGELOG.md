@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-10-09
+
+### Documentation
+
+- **readme**: Square off the screenshot's shadow and corners
+- **readme**: Add a screenshot of the interface
+- Trim source comments to what a signature cannot say
+- **readme**: Open with why the player exists
+- **readme**: Show the herdr logo beside its heading
+
+### Features
+
+- **audio**: Play the site's control tick on transport changes
+
 ## [1.2.1] - 2026-09-27
 
 ### Bug fixes
@@ -15,6 +29,10 @@ All notable changes to this project will be documented in this file.
 ### Style
 
 - Capitalize every user-facing message
+
+### Release
+
+- V1.2.1
 
 ## [1.2.0] - 2026-09-27
 
