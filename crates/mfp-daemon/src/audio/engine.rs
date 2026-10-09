@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
@@ -15,7 +15,7 @@ use rodio::source::SquareWave;
 use super::seek::{self, SeekPlan};
 use super::source::{SampleTap, Tap};
 use super::spectrum::Analyser;
-use crate::state::SharedState;
+use crate::state::{self, SharedState};
 
 const TICK: Duration = Duration::from_millis(100);
 
@@ -26,6 +26,8 @@ const CLICK_HZ: f32 = 5_555.0;
 const CLICK_GAIN: f32 = 0.125;
 
 const CLICK_LENGTH: Duration = Duration::from_millis(20);
+
+const CLICK_DRAIN: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub enum AudioCommand {
@@ -49,7 +51,7 @@ pub enum AudioCommand {
 
 pub struct AudioEngine {
     commands: Sender<AudioCommand>,
-    thread: JoinHandle<()>,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl AudioEngine {
@@ -79,7 +81,10 @@ impl AudioEngine {
                 })?;
 
         match opened.recv() {
-            Ok(Ok(())) => Ok(Self { commands, thread }),
+            Ok(Ok(())) => Ok(Self {
+                commands,
+                thread: Mutex::new(Some(thread)),
+            }),
             Ok(Err(error)) => {
                 let _ = thread.join();
                 Err(error)
@@ -96,9 +101,11 @@ impl AudioEngine {
             .map_err(|_| Error::PlaybackFailed("The audio thread is gone".into()))
     }
 
-    pub fn shutdown(self) {
+    pub fn shutdown(&self) {
         let _ = self.commands.send(AudioCommand::Shutdown);
-        let _ = self.thread.join();
+        if let Some(thread) = state::lock(&self.thread).take() {
+            let _ = thread.join();
+        }
     }
 
     #[cfg(test)]
@@ -108,7 +115,13 @@ impl AudioEngine {
             .name("mfp-audio-recording".into())
             .spawn(|| {})
             .expect("a thread that does nothing");
-        (Self { commands, thread }, requests)
+        (
+            Self {
+                commands,
+                thread: Mutex::new(Some(thread)),
+            },
+            requests,
+        )
     }
 }
 
@@ -164,6 +177,13 @@ impl Output {
     fn click(&self) {
         if let Some(effects) = &self.effects {
             effects.add(click());
+        }
+    }
+
+    fn farewell(&self) {
+        if let Some(effects) = &self.effects {
+            effects.add(click());
+            std::thread::sleep(CLICK_DRAIN);
         }
     }
 }
@@ -316,6 +336,7 @@ impl Engine {
         self.playback = PlaybackState::Stopped;
         self.loaded = None;
         self.publish();
+        self.output.farewell();
     }
 
     fn handle(

@@ -785,9 +785,7 @@ impl Player for DaemonPlayer {
         self.downloads.shutdown();
 
         self.record_position();
-        if let Err(error) = self.audio.send(AudioCommand::Shutdown) {
-            tracing::warn!(%error, "could not stop the audio thread");
-        }
+        self.audio.shutdown();
 
         if let Err(error) = self.store.sync() {
             tracing::error!(%error, "could not persist state before exit");
