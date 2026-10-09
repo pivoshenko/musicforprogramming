@@ -75,7 +75,9 @@ served when a refresh fails. This is what lets the player start with no network.
 **Analyser.** `audio/spectrum.rs` reproduces Web Audio's `getByteFrequencyData` - mono downmix, Hann
 window, 2048-point transform, exponential smoothing against the previous frame, linear scaling from
 `SPECTRUM_MIN_DB` to `SPECTRUM_MAX_DB` onto `0..=255` - so a client can run the site's own analyser
-arithmetic unchanged.
+arithmetic unchanged. The site's control tick (20 ms of a 5555 Hz square wave at 0.125) is added
+straight to the device mixer beside the player, not through it, so it still sounds on pause and never
+reaches the analyser's tap.
 
 **Updates.** `mfp-tui/src/update/` is the only part of the client that reaches the network, and it
 reaches GitHub rather than the site. `mod.rs` resolves the latest release and decides whether this
