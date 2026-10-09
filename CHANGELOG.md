@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-10-09
+
+### Features
+
+- **audio**: Play the control tick when the daemon shuts down
+
 ## [1.3.0] - 2026-10-09
 
 ### Documentation
@@ -15,6 +21,10 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - **audio**: Play the site's control tick on transport changes
+
+### Release
+
+- V1.3.0
 
 ## [1.2.1] - 2026-09-27
 
