@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -838,7 +838,11 @@ mod tests {
 
         let samples: Vec<_> = tick.collect();
         assert_eq!(samples.len(), 960);
-        assert!(samples.iter().all(|sample| sample.abs() <= CLICK_GAIN + f32::EPSILON));
+        assert!(
+            samples
+                .iter()
+                .all(|sample| sample.abs() <= CLICK_GAIN + f32::EPSILON)
+        );
         assert!(samples.iter().any(|sample| *sample > 0.0));
         assert!(samples.iter().any(|sample| *sample < 0.0));
     }
