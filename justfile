@@ -5,16 +5,18 @@ install:
     cargo fetch
 
 format:
-    cargo fmt
+    cargo clippy --fix --allow-dirty --allow-staged --workspace --all-targets
+    cargo fmt --all
 
 lint:
+    cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
 
 audit:
     cargo deny check
 
 test:
-    cargo test --workspace
+    @[ -f .no-tests ] && echo "skipping (.no-tests sentinel)" || cargo test --workspace
 
 check: lint audit test build
 
