@@ -24,7 +24,7 @@ update:
     cargo update
 
 build:
-    cargo build --release
+    cargo build --release --workspace
 
 run:
     cargo run --bin mfp
