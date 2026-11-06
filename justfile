@@ -26,7 +26,7 @@ update:
 build:
     cargo build --release --workspace
 
-run:
+run-app:
     cargo run --bin mfp
 
 generate-changelog:

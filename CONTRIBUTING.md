@@ -83,7 +83,7 @@ This project uses [`just`](https://github.com/casey/just) as its task runner. Ru
 | `check`                   | Runs `lint`, `audit`, `test`, and `build`                                |
 | `update`                  | Upgrades the lockfile to the newest compatible versions                  |
 | `build`                   | Builds the optimized release binaries                                    |
-| `run`                     | Runs the interface from the working tree                                 |
+| `run-app`                 | Runs the interface from the working tree                                 |
 | `generate-changelog`      | Regenerates `CHANGELOG.md` from the commit history with git-cliff        |
 | `generate-social-preview` | Rasterizes the social preview SVG into a 1280x640 PNG via `rsvg-convert` |
 
