@@ -76,10 +76,10 @@ This project uses [`just`](https://github.com/casey/just) as its task runner. Ru
 | Command                   | What it does                                                             |
 | ------------------------- | ------------------------------------------------------------------------ |
 | `install`                 | Fetches the crate dependencies into the cargo cache                      |
-| `format`                  | Reformats the Rust sources in place                                      |
-| `lint`                    | Lints every target with Clippy, failing on any warning                   |
+| `format`                  | Applies Clippy autofixes, then reformats the Rust sources in place       |
+| `lint`                    | Checks formatting, then runs Clippy on all targets, denying warnings     |
 | `audit`                   | Checks licences, advisories, and banned crates with cargo-deny           |
-| `test`                    | Runs the workspace test suite                                            |
+| `test`                    | Runs the workspace tests, skipped if `.no-tests` is present              |
 | `check`                   | Runs `lint`, `audit`, `test`, and `build`                                |
 | `update`                  | Upgrades the lockfile to the newest compatible versions                  |
 | `build`                   | Builds the optimized release binaries                                    |
