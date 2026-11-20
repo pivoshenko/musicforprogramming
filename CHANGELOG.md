@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2] - 2026-11-20
+
+### CI/CD
+
+- Build the aarch64 linux release natively on an arm runner
+
 ## [1.4.1] - 2026-11-20
 
 ### Build
@@ -27,6 +33,10 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous
 
 - **daemon**: Apply rustfmt to the audio engine
+
+### Release
+
+- V1.4.1
 
 ## [1.4.0] - 2026-10-09
 
