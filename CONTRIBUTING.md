@@ -76,15 +76,21 @@ This project uses [`just`](https://github.com/casey/just) as its task runner. Ru
 | Command                   | What it does                                                             |
 | ------------------------- | ------------------------------------------------------------------------ |
 | `install`                 | Fetches the crate dependencies into the cargo cache                      |
+| `install-package`         | `install` runs this part on its own, the only part today                 |
 | `format`                  | Applies Clippy autofixes, then reformats the Rust sources in place       |
+| `format-package`          | `format` runs this part on its own, the only part today                  |
 | `lint`                    | Checks formatting, then runs Clippy on all targets, denying warnings     |
+| `lint-package`            | `lint` runs this part on its own, the only part today                    |
 | `audit`                   | Checks licences, advisories, and banned crates with cargo-deny           |
+| `audit-package`           | `audit` runs this part on its own, the only part today                   |
 | `test`                    | Runs the workspace tests, skipped if `.no-tests` is present              |
+| `test-package`            | `test` runs this part on its own, the only part today                    |
 | `check`                   | Runs `lint`, `audit`, `test`, and `build`                                |
 | `update`                  | Upgrades the lockfile to the newest compatible versions                  |
+| `update-package`          | `update` runs this part on its own, the only part today                  |
 | `build`                   | Builds the optimized release binaries                                    |
+| `build-package`           | `build` runs this part on its own, the only part today                   |
 | `run-app`                 | Runs the interface from the working tree                                 |
-| `generate-changelog`      | Regenerates `CHANGELOG.md` from the commit history with git-cliff        |
 | `generate-social-preview` | Rasterizes the social preview SVG into a 1280x640 PNG via `rsvg-convert` |
 
 1. Fork the repository and create a branch for your change
@@ -112,8 +118,8 @@ Workflows live in `.github/workflows`:
 
 | Workflow | Trigger                                            | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | -------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CI       | Push to `main`, pull requests, `workflow_dispatch` | `ci-rs` runs on `ubuntu-24.04-arm` and `macos-15`: stable toolchain with rustfmt and Clippy over a cached cargo registry, ALSA headers on Linux, then format check, lint, test, and build. `audit` runs cargo-deny on `ubuntu-24.04-arm`. There is no Windows leg - the client speaks over a Unix domain socket                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Release  | `workflow_dispatch` (optional `version` input)     | Five chained jobs: `tag` resolves the next version from the commit history with git-cliff or from the optional input, bumps `Cargo.toml` and the lockfile, regenerates `CHANGELOG.md`, then commits and pushes `main` with the `v<version>` tag; `build` cross-compiles release binaries for four targets (`x86_64` and `aarch64`, each for `unknown-linux-gnu` and `apple-darwin`), packaging `mfp` and `mfp-daemon` into a per-target `.tar.gz`; `release` publishes the GitHub Release with the generated notes, every archive, and a `checksums.txt`; then `publish-crates` publishes `mfp-core`, `mfp-daemon`, and `mfp-tui` to Crates.io in dependency order, and `update-homebrew` pushes a refreshed `Formula/musicforprogramming.rb` to `pivoshenko/homebrew-tap` |
+| CI       | Push to `main`, pull requests, `workflow_dispatch` | `ci-package` runs on `ubuntu-24.04-arm` and `macos-15`: stable toolchain with rustfmt and Clippy over a cached cargo registry, ALSA headers on Linux, then format check, lint, audit, test, and build through the `*-package` recipes. The audit step installs and runs cargo-deny on the Linux leg only; there is no separate audit job. There is no Windows leg - the client speaks over a Unix domain socket                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Release  | `workflow_dispatch` (optional `version` input)     | Five chained jobs: `tag` resolves the next version from the commit history with git-cliff or from the optional input, bumps `Cargo.toml` and the lockfile, regenerates `CHANGELOG.md`, then commits and pushes `main` with the `v<version>` tag, and hands the generated release notes to the `release` job as an artifact; `build` cross-compiles release binaries for four targets (`x86_64` and `aarch64`, each for `unknown-linux-gnu` and `apple-darwin`), packaging `mfp` and `mfp-daemon` into a per-target `.tar.gz`; `release` publishes the GitHub Release with those notes, every archive, and a `checksums.txt`; then `publish-crates` publishes `mfp-core`, `mfp-daemon`, and `mfp-tui` to Crates.io in dependency order, and `update-homebrew` pushes a refreshed `Formula/musicforprogramming.rb` to `pivoshenko/homebrew-tap` |
 
 CI must be green before a pull request is merged.
 
@@ -161,9 +167,11 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 | `docs`     | Changes to documentation only (README, comments, guides)                                                |
 | `refactor` | Code restructuring that does not change external behavior (renaming, extracting functions, simplifying) |
 | `test`     | Adding, updating, or fixing tests without changing production code                                      |
+| `test-package`            | `test` runs this part on its own, the only part today                    |
 | `chore`    | Maintenance tasks that don't affect source code or tests (dependency bumps, config tweaks, .gitignore)  |
 | `ci`       | Changes to CI/CD configuration and scripts (GitHub Actions, workflows, pipelines)                       |
 | `build`    | Changes to the build system or external dependencies (Cargo.toml, justfile)                             |
+| `build-package`           | `build` runs this part on its own, the only part today                   |
 | `perf`     | A code change that improves performance without altering functionality                                  |
 | `style`    | Formatting-only changes (whitespace, semicolons, linting) with no logic changes                         |
 | `design`   | Changes to visual or UI design assets and layout                                                        |

@@ -35,7 +35,6 @@ than a sandbox artifact. Anything that needs the real world is `#[ignore]`d with
 attribute: an audio output device, the network, or a benchmark. `mfp-daemon/tests/end_to_end.rs`
 spawns the binary and is audible, and the player has no volume of its own.
 
-`just generate-changelog` regenerates `CHANGELOG.md` from the commit history with git-cliff.
 `just generate-social-preview` rasterizes `assets/preview_social_dark.svg` into the 1280x640 PNG for
 GitHub's social preview; that SVG's colours come from `crates/mfp-tui/src/ui/theme.rs`, so a palette
 change belongs in both.
