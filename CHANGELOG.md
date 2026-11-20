@@ -2,11 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1] - 2026-11-20
+
+### Build
+
+- **justfile**: Split recipes into package parts
+- **deps**: Upgrade cargo dependencies
+- **justfile**: Rename run to run-app
+- **justfile**: Build the whole cargo workspace
+- Standardize just recipes
+- **deps**: Update dependencies
+- **deps**: Bump tokio and webpki crates to clear RUSTSEC advisories
+- **deps**: Upgrade rustls to clear RUSTSEC-2026-0346..0349
+
+### CI/CD
+
+- Fold audit into ci and standardize the release
+
+### Documentation
+
+- Describe the standardized recipes
+- Move agent instructions from CLAUDE.md to AGENTS.md
+
+### Miscellaneous
+
+- **daemon**: Apply rustfmt to the audio engine
+
 ## [1.4.0] - 2026-10-09
 
 ### Features
 
 - **audio**: Play the control tick when the daemon shuts down
+
+### Release
+
+- V1.4.0
 
 ## [1.3.0] - 2026-10-09
 
