@@ -103,7 +103,7 @@ jobs:
             os: ubuntu-latest
             archive: musicforprogramming-x86_64-unknown-linux-gnu.tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             archive: musicforprogramming-aarch64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
@@ -131,45 +131,12 @@ jobs:
       - name: Install cross target
         run: rustup target add ${{ matrix.target }}
 
-      # rodio links against ALSA on Linux, and the aarch64 build needs the
-      # cross linker plus the target's own copy of the library
+      # rodio links against ALSA on Linux
       - name: Install audio dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libasound2-dev
-
-      - name: Install cross-compiler
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          # archive.ubuntu.com and security.ubuntu.com carry amd64 only, and arm64
-          # lives on ports.ubuntu.com. Without pinning the stock sources to amd64 and
-          # pointing arm64 at ports, apt-get update 404s on every arm64 index. The
-          # runner's sources are deb822, so this is an Architectures field rather than
-          # an [arch=] tag on a one-line entry
-          sudo dpkg --add-architecture arm64
-          sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          sudo tee /etc/apt/sources.list.d/arm64.sources >/dev/null <<EOF
-          Types: deb
-          Architectures: arm64
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: $(lsb_release -cs) $(lsb_release -cs)-updates $(lsb_release -cs)-backports $(lsb_release -cs)-security
-          Components: main universe restricted multiverse
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-          sudo apt-get update
-          # aws-lc-sys (via rustls) compiles C for the target, so the cross gcc needs an
-          # arm64 sysroot as well: libc6-dev:arm64 carries the arch-specific bits/ headers
-          # and linux-libc-dev:arm64 carries asm/. Without them gcc falls back to the
-          # host's /usr/include and dies on bits/libc-header-start.h
-          sudo apt-get install --no-install-recommends -y \
-            gcc-aarch64-linux-gnu \
-            libasound2-dev:arm64 \
-            libc6-dev:arm64 \
-            linux-libc-dev:arm64
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
